@@ -3,7 +3,41 @@
 use App\Http\Controllers\FolderSelectionController;
 use App\Http\Controllers\ArticleSearchController;
 use App\Http\Controllers\DirectAccessController;
+use App\Http\Controllers\AuthController;
+use App\Http\Controllers\MedecinController;
+use App\Http\Controllers\MedicamentController;
 use Illuminate\Support\Facades\Route;
+
+// Routes pour la gestion des medecins
+Route::prefix('medecins')->group(function () {
+    Route::get('/', [MedecinController::class, 'index']);
+    Route::post('/', [MedecinController::class, 'store']);
+    Route::get('/{medecin}', [MedecinController::class, 'show']);
+    Route::put('/{medecin}', [MedecinController::class, 'update']);
+    Route::delete('/{medecin}', [MedecinController::class, 'destroy']);
+    Route::get('/search/q', [MedecinController::class, 'search']);
+});
+
+// Routes pour médicaments avec middleware auth si nécessaire
+Route::prefix('medicaments')->group(function () {
+    Route::get('/', [MedicamentController::class, 'index']); // Liste avec pagination
+    Route::post('/', [MedicamentController::class, 'store']); // Créer
+    Route::get('/families', [MedicamentController::class, 'families']); // Familles
+    Route::get('/search', [MedicamentController::class, 'search']); // Recherche rapide
+    Route::get('/{medicament}', [MedicamentController::class, 'show']); // Détails
+    Route::put('/{medicament}', [MedicamentController::class, 'update']); // Modifier
+    Route::delete('/{medicament}', [MedicamentController::class, 'destroy']); // Supprimer
+});
+
+// ===========================================
+// ROUTES D'AUTHENTIFICATION
+// ===========================================
+Route::prefix('auth')->group(function () {
+    Route::post('login', [AuthController::class, 'login'])->name('auth.login');
+    Route::post('logout', [AuthController::class, 'logout'])->name('auth.logout');
+    Route::get('me', [AuthController::class, 'me'])->name('auth.me');
+    Route::get('check', [AuthController::class, 'checkAuth'])->name('auth.check');
+});
 
 // Groupe des routes pour la sélection de dossiers
 Route::prefix('folder-selection')->group(function () {
