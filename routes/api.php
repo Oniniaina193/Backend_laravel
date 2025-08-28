@@ -107,12 +107,18 @@ Route::prefix('clients')->group(function () {
     Route::put('/{client}', [ClientController::class, 'update']);
     Route::delete('/{client}', [ClientController::class, 'destroy']);
 });
-// Routes pour la gestion des ordonnances
+
+//Route pour les ordonnances
 Route::prefix('ordonnances')->group(function () {
     Route::get('/', [OrdonnanceController::class, 'index']);
     Route::post('/', [OrdonnanceController::class, 'store']);
+
+    Route::get('/data/medecins-selection', [OrdonnanceController::class, 'getMedecinsForSelection']);
+    Route::get('/historique/medicaments', [OrdonnanceController::class, 'getMedicamentsAvecOrdonnances']);
+    Route::get('/historique', [OrdonnanceController::class, 'getHistoriqueParMedicament']);
+
+    // Ensuite seulement les routes avec paramètre
     Route::get('/{ordonnance}', [OrdonnanceController::class, 'show']);
     Route::put('/{ordonnance}', [OrdonnanceController::class, 'update']);
     Route::delete('/{ordonnance}', [OrdonnanceController::class, 'destroy']);
-    Route::get('/data/medecins-selection', [OrdonnanceController::class, 'getMedecinsForSelection']);
 });

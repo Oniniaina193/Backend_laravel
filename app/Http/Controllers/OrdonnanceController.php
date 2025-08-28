@@ -324,6 +324,138 @@ class OrdonnanceController extends Controller
         }
     }
 
+    
+/**
+ * Récupérer la liste des médicaments qui ont des ordonnances
+ * Pour le filtre de sélection dans l'historique
+ */
+public function getMedicamentsAvecOrdonnances(): JsonResponse
+{
+    try {
+        $medicaments = DB::table('ordonnance_lignes')
+            ->select('designation')
+            ->selectRaw('COUNT(DISTINCT ordonnance_id) as total_ordonnances')
+            ->groupBy('designation')
+            ->orderBy('designation')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $medicaments,
+            'message' => 'Liste des médicaments récupérée avec succès'
+        ]);
+
+    } catch (Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Erreur lors de la récupération des médicaments',
+            'error' => config('app.debug') ? $e->getMessage() : 'Erreur serveur'
+        ], 500);
+    }
+}
+
+/**
+ * Récupérer l'historique des ordonnances par médicament et/ou par date
+ * MODIFICATION: Permettre recherche par date seule
+ */
+public function getHistoriqueParMedicament(Request $request): JsonResponse
+{
+    try {
+        $validated = $request->validate([
+            'medicament' => 'nullable|string', // MODIFIÉ: optionnel maintenant
+            'date' => 'nullable|date',
+            'page' => 'nullable|integer|min:1',
+            'per_page' => 'nullable|integer|min:1|max:100'
+        ]);
+
+        $perPage = $validated['per_page'] ?? 10;
+        $medicament = $validated['medicament'] ?? null;
+        $dateFiltre = $validated['date'] ?? null;
+
+        // MODIFICATION: Vérifier qu'au moins un critère est fourni
+        if (!$medicament && !$dateFiltre) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Veuillez fournir au moins un critère de recherche (médicament ou date)',
+                'errors' => ['criteres' => 'Au moins un critère de recherche est requis']
+            ], 422);
+        }
+
+        // Construire la requête pour récupérer les ordonnances
+        $query = Ordonnance::with(['medecin', 'client', 'lignes']);
+
+        // MODIFICATION: Appliquer le filtre médicament seulement s'il est fourni
+        if ($medicament) {
+            $query->whereHas('lignes', function ($q) use ($medicament) {
+                $q->where('designation', $medicament);
+            });
+        }
+
+        // Appliquer le filtre de date si fourni
+        if ($dateFiltre) {
+            $query->whereDate('date', $dateFiltre);
+        }
+
+        // Ordonner par date décroissante
+        $query->orderBy('date', 'desc')->orderBy('created_at', 'desc');
+
+        // Pagination
+        $ordonnances = $query->paginate($perPage);
+
+        // MODIFICATION: Compter le total des ordonnances avec les mêmes critères
+        $queryCount = Ordonnance::query();
+        
+        if ($medicament) {
+            $queryCount->whereHas('lignes', function ($q) use ($medicament) {
+                $q->where('designation', $medicament);
+            });
+        }
+
+        if ($dateFiltre) {
+            $queryCount->whereDate('date', $dateFiltre);
+        }
+
+        $totalOrdonnances = $queryCount->count();
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'ordonnances' => $ordonnances->items(),
+                'pagination' => [
+                    'current_page' => $ordonnances->currentPage(),
+                    'last_page' => $ordonnances->lastPage(),
+                    'per_page' => $ordonnances->perPage(),
+                    'total' => $ordonnances->total(),
+                    'from' => $ordonnances->firstItem(),
+                    'to' => $ordonnances->lastItem(),
+                ],
+                'total_ordonnances' => $totalOrdonnances,
+                'medicament_recherche' => $medicament,
+                'date_filtre' => $dateFiltre,
+                'criteres_recherche' => [
+                    'par_medicament' => !empty($medicament),
+                    'par_date' => !empty($dateFiltre),
+                    'les_deux' => !empty($medicament) && !empty($dateFiltre)
+                ]
+            ],
+            'message' => 'Historique récupéré avec succès'
+        ]);
+
+    } catch (ValidationException $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Paramètres de recherche invalides',
+            'errors' => $e->errors()
+        ], 422);
+    } catch (Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Erreur lors de la récupération de l\'historique',
+            'error' => config('app.debug') ? $e->getMessage() : 'Erreur serveur'
+        ], 500);
+    }
+}
+
     /**
      * MODIFICATION 2 & 5: Récupérer la liste des médecins pour sélection 
      * Format: "Nom Complet (ONM)"
