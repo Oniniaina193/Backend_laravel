@@ -505,4 +505,196 @@ class DirectAccessController extends Controller
             ], 500);
         }
     }
+
+
+    /**
+     * Récupérer les données d'un ticket depuis Caiss_frontoffice.mdb
+     */
+    public function getTicketDetails(Request $request, $codeTicket): JsonResponse
+{
+    try {
+        if (!$request->session()->isStarted()) {
+            $request->session()->start();
+        }
+
+        $selectedFolder = $request->session()->get('selected_folder');
+        if (!$selectedFolder) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Aucun dossier sélectionné.'
+            ], 400);
+        }
+
+        // Validation du paramètre de route (pas de request->input())
+        if (empty($codeTicket) || strlen(trim($codeTicket)) < 2) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Code ticket requis et doit contenir au moins 2 caractères'
+            ], 400);
+        }
+
+        // Nettoyer le code ticket
+        $codeTicket = trim($codeTicket);
+        
+        $frontofficeDbPath = $this->getFrontofficeDbPath($selectedFolder);
+        
+        if (!file_exists($frontofficeDbPath)) {
+            return response()->json([
+                'success' => false,
+                'message' => "Fichier Caiss_frontoffice.mdb non trouvé: $frontofficeDbPath"
+            ], 404);
+        }
+
+        // Connexion à Caiss_frontoffice.mdb
+        $frontofficePdo = $this->connectToAccess($frontofficeDbPath);
+
+        // 1. Rechercher le ticket par code
+        $ticketQuery = "SELECT Id, Code FROM Ticket WHERE Code = ?";
+        $ticketStmt = $frontofficePdo->prepare($ticketQuery);
+        $ticketStmt->execute([$codeTicket]);
+        $ticket = $ticketStmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$ticket) {
+            return response()->json([
+                'success' => false,
+                'message' => "Aucun ticket trouvé avec le code: $codeTicket"
+            ], 404);
+        }
+
+        // 2. Récupérer les lignes du ticket
+        $lignesQuery = "SELECT CodeDoc, Designation, Qte FROM TicketLigne WHERE CodeDoc = ?";
+        $lignesStmt = $frontofficePdo->prepare($lignesQuery);
+        $lignesStmt->execute([$ticket['Id']]);
+        $lignes = $lignesStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // 3. Formater les résultats avec correction d'encodage
+        $medicaments = array_map(function($ligne) {
+            return [
+                'code_doc' => $ligne['CodeDoc'],
+                'designation' => $this->fixEncoding($ligne['Designation'] ?? ''),
+                'quantite' => intval($ligne['Qte'] ?? 0),
+                'posologie' => '', // À remplir par l'utilisateur
+                'duree' => '' // À remplir par l'utilisateur
+            ];
+        }, $lignes);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'ticket' => [
+                    'id' => $ticket['Id'],
+                    'code' => $this->fixEncoding($ticket['Code']),
+                ],
+                'medicaments' => $medicaments,
+                'total_medicaments' => count($medicaments)
+            ],
+            'message' => 'Données du ticket récupérées avec succès'
+        ]);
+
+    } catch (Exception $e) {
+        Log::error('Erreur lors de la récupération du ticket', [
+            'code_ticket' => $codeTicket ?? 'N/A',
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Erreur lors de la récupération du ticket: ' . $e->getMessage()
+        ], 500);
+    }
+}
+
+    /**
+     * Rechercher des tickets par code (pour autocomplete)
+     */
+    public function searchTickets(Request $request): JsonResponse
+    {
+        try {
+            if (!$request->session()->isStarted()) {
+                $request->session()->start();
+            }
+
+            $selectedFolder = $request->session()->get('selected_folder');
+            if (!$selectedFolder) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Aucun dossier sélectionné.'
+                ], 400);
+            }
+
+            $request->validate([
+                'search' => 'required|string|min:2|max:50',
+                'limit' => 'nullable|integer|min:1|max:20'
+            ]);
+
+            $search = $request->input('search');
+            $limit = $request->input('limit', 10);
+
+            $frontofficeDbPath = $this->getFrontofficeDbPath($selectedFolder);
+            
+            if (!file_exists($frontofficeDbPath)) {
+                return response()->json([
+                    'success' => true,
+                    'data' => []
+                ]);
+            }
+
+            $frontofficePdo = $this->connectToAccess($frontofficeDbPath);
+
+            // Rechercher les tickets par code
+            $searchQuery = "SELECT TOP $limit Id, Code FROM Ticket 
+                           WHERE LCASE(Code) LIKE LCASE(?) 
+                           ORDER BY Code DESC";
+            
+            $stmt = $frontofficePdo->prepare($searchQuery);
+            $stmt->execute(["%$search%"]);
+            $tickets = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // Formater les résultats
+            $formattedTickets = array_map(function($ticket) {
+                return [
+                    'id' => $ticket['Id'],
+                    'code' => $this->fixEncoding($ticket['Code']),
+                    'display' => $this->fixEncoding($ticket['Code'])
+                ];
+            }, $tickets);
+
+            return response()->json([
+                'success' => true,
+                'data' => $formattedTickets
+            ]);
+
+        } catch (Exception $e) {
+            Log::error('Erreur lors de la recherche de tickets', [
+                'search' => $request->input('search'),
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la recherche'
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtenir le chemin du fichier Caiss_frontoffice.mdb
+     */
+    private function getFrontofficeDbPath($selectedFolder): string
+    {
+        if (isset($selectedFolder['stored_file_path'])) {
+            // Fichier uploadé - le fichier frontoffice est dans le même dossier
+            $caissPath = storage_path('app/' . $selectedFolder['stored_file_path']);
+            $folderPath = dirname($caissPath);
+            return $folderPath . DIRECTORY_SEPARATOR . 'Caiss_frontoffice.mdb';
+        } else if (isset($selectedFolder['folder_path'])) {
+            // Chemin traditionnel
+            $folderPath = $selectedFolder['folder_path'];
+            $normalizedPath = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $folderPath);
+            return $normalizedPath . DIRECTORY_SEPARATOR . 'Caiss_frontoffice.mdb';
+        }
+        
+        throw new Exception('Aucun chemin Caiss_frontoffice.mdb disponible');
+    }
 }
