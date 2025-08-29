@@ -8,6 +8,7 @@ use App\Http\Controllers\MedecinController;
 use App\Http\Controllers\MedicamentController;
 use App\Http\Controllers\ClientController;
 use App\Http\Controllers\OrdonnanceController;
+use App\Http\Controllers\StatistiquesController;
 use Illuminate\Support\Facades\Route;
 
 // Routes pour la gestion des medecins
@@ -138,4 +139,20 @@ Route::prefix('ordonnances')->group(function () {
     Route::get('/{ordonnance}', [OrdonnanceController::class, 'show']);  // ✅ Ajout du slash
     Route::put('/{ordonnance}', [OrdonnanceController::class, 'update']); // ✅ Ajout du slash
     Route::delete('/{ordonnance}', [OrdonnanceController::class, 'destroy']); // ✅ Ajout du slash
+});
+
+// Routes pour les statistiques - Regroupées sous le préfixe 'statistiques'
+Route::prefix('statistiques')->middleware(['web'])->group(function () {
+    
+    // Route principale - Toutes les stats du dashboard
+    Route::get('/dashboard', [StatistiquesController::class, 'getDashboardStats'])
+         ->name('statistiques.dashboard');
+    
+    // Route pour les graphiques des ventes mensuelles
+    Route::get('/ventes-mensuelles', [StatistiquesController::class, 'getVentesMensuelles'])
+         ->name('statistiques.ventes.mensuelles');
+    
+    // Route pour le top 10 des médicaments
+    Route::get('/top-medicaments', [StatistiquesController::class, 'getTopMedicaments'])
+         ->name('statistiques.top.medicaments');
 });
