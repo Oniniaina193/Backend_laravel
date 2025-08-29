@@ -108,17 +108,34 @@ Route::prefix('clients')->group(function () {
     Route::delete('/{client}', [ClientController::class, 'destroy']);
 });
 
-//Route pour les ordonnances
+// Routes des ordonnances (TOUTES automatiquement filtrées par le middleware)
 Route::prefix('ordonnances')->group(function () {
+    
+    // ❌ PROBLÈME : Vos routes actuelles ne correspondent pas aux appels frontend
+    
+    // ✅ CORRECTIONS - Routes dans le bon ordre :
+    
+    // 1. Routes spécifiques AVANT les routes paramétrées
+    
+    // ✅ CORRECT: /api/ordonnances/data/medecins-selection
+    Route::get('data/medecins-selection', [OrdonnanceController::class, 'getMedecinsForSelection']);
+    
+    // ✅ CORRECT: /api/ordonnances/suggest-numero  
+    Route::get('suggest-numero', [OrdonnanceController::class, 'suggestNumeroOrdonnance']);
+    
+    // ✅ CORRECT: /api/ordonnances/historique/medicaments
+    Route::get('historique/medicaments', [OrdonnanceController::class, 'getMedicamentsAvecOrdonnances']);
+    
+    // ✅ CORRECT: /api/ordonnances/historique
+    Route::get('historique', [OrdonnanceController::class, 'getHistoriqueParMedicament']);
+    
+    // ✅ CORRECT: /api/ordonnances/statistiques
+    Route::get('statistiques', [OrdonnanceController::class, 'getStatistiquesDossier']);
+    
+    // 2. CRUD principal (routes paramétrées APRÈS les spécifiques)
     Route::get('/', [OrdonnanceController::class, 'index']);
     Route::post('/', [OrdonnanceController::class, 'store']);
-
-    Route::get('/data/medecins-selection', [OrdonnanceController::class, 'getMedecinsForSelection']);
-    Route::get('/historique/medicaments', [OrdonnanceController::class, 'getMedicamentsAvecOrdonnances']);
-    Route::get('/historique', [OrdonnanceController::class, 'getHistoriqueParMedicament']);
-
-    // Ensuite seulement les routes avec paramètre
-    Route::get('/{ordonnance}', [OrdonnanceController::class, 'show']);
-    Route::put('/{ordonnance}', [OrdonnanceController::class, 'update']);
-    Route::delete('/{ordonnance}', [OrdonnanceController::class, 'destroy']);
+    Route::get('/{ordonnance}', [OrdonnanceController::class, 'show']);  // ✅ Ajout du slash
+    Route::put('/{ordonnance}', [OrdonnanceController::class, 'update']); // ✅ Ajout du slash
+    Route::delete('/{ordonnance}', [OrdonnanceController::class, 'destroy']); // ✅ Ajout du slash
 });

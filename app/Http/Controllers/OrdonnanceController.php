@@ -16,10 +16,30 @@ use Exception;
 class OrdonnanceController extends Controller
 {
     /**
+     * Vérifier qu'un dossier est sélectionné avant toute opération
+     */
+    private function checkDossierSelection(Request $request)
+    {
+        if (!$request->has('current_dossier_vente') || !$request->get('current_dossier_vente')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Aucun dossier de vente sélectionné. Veuillez d\'abord sélectionner un dossier.',
+                'error_code' => 'NO_FOLDER_SELECTED'
+            ], 400);
+        }
+        return null;
+    }
+
+    /**
      * Liste paginée des ordonnances avec recherche
+     * AUTOMATIQUEMENT filtrée par le dossier sélectionné
      */
     public function index(Request $request): JsonResponse
     {
+        // Vérifier la sélection du dossier
+        $folderCheck = $this->checkDossierSelection($request);
+        if ($folderCheck) return $folderCheck;
+
         try {
             $perPage = min($request->get('per_page', 20), 100);
             $search = $request->get('search');
@@ -28,6 +48,7 @@ class OrdonnanceController extends Controller
             $dateDebut = $request->get('date_debut');
             $dateFin = $request->get('date_fin');
 
+            // Le global scope s'applique automatiquement - seules les ordonnances du dossier actuel
             $ordonnances = Ordonnance::with(['medecin', 'client'])
                 ->when($search, function ($query, $search) {
                     $query->search($search);
@@ -62,7 +83,8 @@ class OrdonnanceController extends Controller
                         'total' => $ordonnances->total(),
                         'from' => $ordonnances->firstItem(),
                         'to' => $ordonnances->lastItem(),
-                    ]
+                    ],
+                    'current_dossier' => $request->get('current_dossier_vente')
                 ],
                 'message' => 'Ordonnances récupérées avec succès'
             ]);
@@ -77,19 +99,34 @@ class OrdonnanceController extends Controller
     }
 
     /**
-     * Créer une nouvelle ordonnance avec client et médicaments
-     * MODIFICATION 1: Numéro d'ordonnance saisi manuellement (string)
+     * Créer une nouvelle ordonnance
+     * AUTOMATIQUEMENT liée au dossier sélectionné
      */
     public function store(Request $request): JsonResponse
     {
+        // Vérifier la sélection du dossier
+        $folderCheck = $this->checkDossierSelection($request);
+        if ($folderCheck) return $folderCheck;
+
         try {
+            $currentDossier = $request->get('current_dossier_vente');
+
             $validated = $request->validate([
-                // MODIFICATION 1: numéro d'ordonnance manuel obligatoire (string)
-                'numero_ordonnance' => 'required|string|max:50|unique:ordonnances,numero_ordonnance',
+                'numero_ordonnance' => [
+                    'required',
+                    'string',
+                    'max:50',
+                    // NOUVELLE RÈGLE : unique seulement dans le dossier actuel
+                    function ($attribute, $value, $fail) use ($currentDossier) {
+                        if (Ordonnance::numeroExists($value, $currentDossier)) {
+                            $fail("Ce numéro d'ordonnance existe déjà dans le dossier $currentDossier");
+                        }
+                    }
+                ],
                 'medecin_id' => 'required|exists:medecins,id',
                 'date' => 'required|date',
                 
-                // Données client (création ou sélection)
+                // Données client
                 'client_id' => 'nullable|exists:clients,id',
                 'client' => 'required_without:client_id|array',
                 'client.nom_complet' => 'required_without:client_id|string|max:255',
@@ -105,7 +142,6 @@ class OrdonnanceController extends Controller
                 'medicaments.*.duree' => 'required|string|max:100',
             ], [
                 'numero_ordonnance.required' => 'Le numéro d\'ordonnance est obligatoire',
-                'numero_ordonnance.unique' => 'Ce numéro d\'ordonnance existe déjà',
                 'medecin_id.required' => 'Veuillez sélectionner un médecin',
                 'medecin_id.exists' => 'Le médecin sélectionné n\'existe pas',
             ]);
@@ -119,9 +155,10 @@ class OrdonnanceController extends Controller
                 $client = Client::create($validated['client']);
             }
 
-            // 2. Créer l'ordonnance avec le numéro fourni par l'utilisateur
+            // 2. Créer l'ordonnance - le dossier sera ajouté automatiquement par le model
             $ordonnance = Ordonnance::create([
                 'numero_ordonnance' => $validated['numero_ordonnance'],
+                // dossier_vente sera ajouté automatiquement par le model booted()
                 'date' => $validated['date'],
                 'medecin_id' => $validated['medecin_id'],
                 'client_id' => $client->id,
@@ -147,7 +184,7 @@ class OrdonnanceController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => $ordonnance,
-                'message' => 'Ordonnance créée avec succès'
+                'message' => "Ordonnance créée avec succès dans le dossier $currentDossier"
             ], 201);
 
         } catch (ValidationException $e) {
@@ -168,11 +205,13 @@ class OrdonnanceController extends Controller
     }
 
     /**
-     * Afficher une ordonnance spécifique avec tous les détails
+     * Afficher une ordonnance spécifique
+     * AUTOMATIQUEMENT limitée au dossier sélectionné
      */
     public function show(Ordonnance $ordonnance): JsonResponse
     {
         try {
+            // Le global scope garantit qu'on ne peut voir que les ordonnances du dossier actuel
             $ordonnance->load(['medecin', 'client', 'lignes']);
 
             return response()->json([
@@ -191,22 +230,25 @@ class OrdonnanceController extends Controller
 
     /**
      * Mettre à jour une ordonnance
-     * MODIFICATIONS 3 & 4: Empêcher modification numéro, permettre modification posologie/durée/infos client
+     * AUTOMATIQUEMENT limitée au dossier sélectionné
      */
     public function update(Request $request, Ordonnance $ordonnance): JsonResponse
     {
+        // Vérifier la sélection du dossier
+        $folderCheck = $this->checkDossierSelection($request);
+        if ($folderCheck) return $folderCheck;
+
         try {
             $validated = $request->validate([
-                // MODIFICATION 4: Le numéro d'ordonnance n'est PAS modifiable
                 'medecin_id' => 'required|exists:medecins,id',
                 'date' => 'required|date',
                 
-                // MODIFICATION 4: Données client modifiables
+                // Données client modifiables
                 'client.nom_complet' => 'required|string|max:255',
                 'client.adresse' => 'required|string|max:255',
                 'client.telephone' => 'nullable|string|max:20',
                 
-                // MODIFICATION 4: Médicaments - posologie et durée modifiables
+                // Médicaments - posologie et durée modifiables
                 'medicaments' => 'required|array|min:1',
                 'medicaments.*.id' => 'nullable|exists:ordonnance_lignes,id',
                 'medicaments.*.code_medicament' => 'required|string|max:50',
@@ -214,25 +256,20 @@ class OrdonnanceController extends Controller
                 'medicaments.*.quantite' => 'required|integer|min:1',
                 'medicaments.*.posologie' => 'required|string|max:500',
                 'medicaments.*.duree' => 'required|string|max:100',
-            ], [
-                'medecin_id.required' => 'Veuillez sélectionner un médecin',
-                'medecin_id.exists' => 'Le médecin sélectionné n\'existe pas',
-                'client.nom_complet.required' => 'Le nom du client est obligatoire',
-                'medicaments.required' => 'Au moins un médicament est requis',
             ]);
 
             DB::beginTransaction();
 
-            // 1. Mettre à jour l'ordonnance (SANS le numéro d'ordonnance)
+            // 1. Mettre à jour l'ordonnance (SANS le numéro et SANS le dossier)
             $ordonnance->update([
                 'medecin_id' => $validated['medecin_id'],
                 'date' => $validated['date'],
             ]);
 
-            // 2. Mettre à jour le client (MODIFICATION 4: autorisé)
+            // 2. Mettre à jour le client
             $ordonnance->client->update($validated['client']);
 
-            // 3. Gérer les médicaments - MODIFICATION 4: posologie/durée modifiables
+            // 3. Gérer les médicaments
             $existingIds = [];
             
             foreach ($validated['medicaments'] as $medicament) {
@@ -244,8 +281,8 @@ class OrdonnanceController extends Controller
                             'code_medicament' => $medicament['code_medicament'],
                             'designation' => $medicament['designation'],
                             'quantite' => $medicament['quantite'],
-                            'posologie' => $medicament['posologie'], // MODIFIABLE
-                            'duree' => $medicament['duree'], // MODIFIABLE
+                            'posologie' => $medicament['posologie'],
+                            'duree' => $medicament['duree'],
                         ]);
                         $existingIds[] = $ligne->id;
                     }
@@ -298,15 +335,13 @@ class OrdonnanceController extends Controller
 
     /**
      * Supprimer une ordonnance
+     * AUTOMATIQUEMENT limitée au dossier sélectionné
      */
     public function destroy(Ordonnance $ordonnance): JsonResponse
     {
         try {
             DB::beginTransaction();
-
-            // Les lignes seront supprimées automatiquement grâce à la contrainte CASCADE
             $ordonnance->delete();
-
             DB::commit();
 
             return response()->json([
@@ -324,141 +359,148 @@ class OrdonnanceController extends Controller
         }
     }
 
-    
-/**
- * Récupérer la liste des médicaments qui ont des ordonnances
- * Pour le filtre de sélection dans l'historique
- */
-public function getMedicamentsAvecOrdonnances(): JsonResponse
-{
-    try {
-        $medicaments = DB::table('ordonnance_lignes')
-            ->select('designation')
-            ->selectRaw('COUNT(DISTINCT ordonnance_id) as total_ordonnances')
-            ->groupBy('designation')
-            ->orderBy('designation')
-            ->get();
+    /**
+     * Récupérer la liste des médicaments qui ont des ordonnances
+     * AUTOMATIQUEMENT filtrée par le dossier sélectionné
+     */
+    public function getMedicamentsAvecOrdonnances(Request $request): JsonResponse
+    {
+        // Vérifier la sélection du dossier
+        $folderCheck = $this->checkDossierSelection($request);
+        if ($folderCheck) return $folderCheck;
 
-        return response()->json([
-            'success' => true,
-            'data' => $medicaments,
-            'message' => 'Liste des médicaments récupérée avec succès'
-        ]);
+        try {
+            $currentDossier = $request->get('current_dossier_vente');
 
-    } catch (Exception $e) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Erreur lors de la récupération des médicaments',
-            'error' => config('app.debug') ? $e->getMessage() : 'Erreur serveur'
-        ], 500);
-    }
-}
+            $medicaments = DB::table('ordonnance_lignes')
+                ->join('ordonnances', 'ordonnance_lignes.ordonnance_id', '=', 'ordonnances.id')
+                ->where('ordonnances.dossier_vente', $currentDossier) // FILTRE PAR DOSSIER
+                ->select('ordonnance_lignes.designation')
+                ->selectRaw('COUNT(DISTINCT ordonnances.id) as total_ordonnances')
+                ->groupBy('ordonnance_lignes.designation')
+                ->orderBy('ordonnance_lignes.designation')
+                ->get();
 
-/**
- * Récupérer l'historique des ordonnances par médicament et/ou par date
- * MODIFICATION: Permettre recherche par date seule
- */
-public function getHistoriqueParMedicament(Request $request): JsonResponse
-{
-    try {
-        $validated = $request->validate([
-            'medicament' => 'nullable|string', // MODIFIÉ: optionnel maintenant
-            'date' => 'nullable|date',
-            'page' => 'nullable|integer|min:1',
-            'per_page' => 'nullable|integer|min:1|max:100'
-        ]);
+            return response()->json([
+                'success' => true,
+                'data' => $medicaments,
+                'current_dossier' => $currentDossier,
+                'message' => 'Liste des médicaments récupérée avec succès'
+            ]);
 
-        $perPage = $validated['per_page'] ?? 10;
-        $medicament = $validated['medicament'] ?? null;
-        $dateFiltre = $validated['date'] ?? null;
-
-        // MODIFICATION: Vérifier qu'au moins un critère est fourni
-        if (!$medicament && !$dateFiltre) {
+        } catch (Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Veuillez fournir au moins un critère de recherche (médicament ou date)',
-                'errors' => ['criteres' => 'Au moins un critère de recherche est requis']
-            ], 422);
+                'message' => 'Erreur lors de la récupération des médicaments',
+                'error' => config('app.debug') ? $e->getMessage() : 'Erreur serveur'
+            ], 500);
         }
-
-        // Construire la requête pour récupérer les ordonnances
-        $query = Ordonnance::with(['medecin', 'client', 'lignes']);
-
-        // MODIFICATION: Appliquer le filtre médicament seulement s'il est fourni
-        if ($medicament) {
-            $query->whereHas('lignes', function ($q) use ($medicament) {
-                $q->where('designation', $medicament);
-            });
-        }
-
-        // Appliquer le filtre de date si fourni
-        if ($dateFiltre) {
-            $query->whereDate('date', $dateFiltre);
-        }
-
-        // Ordonner par date décroissante
-        $query->orderBy('date', 'desc')->orderBy('created_at', 'desc');
-
-        // Pagination
-        $ordonnances = $query->paginate($perPage);
-
-        // MODIFICATION: Compter le total des ordonnances avec les mêmes critères
-        $queryCount = Ordonnance::query();
-        
-        if ($medicament) {
-            $queryCount->whereHas('lignes', function ($q) use ($medicament) {
-                $q->where('designation', $medicament);
-            });
-        }
-
-        if ($dateFiltre) {
-            $queryCount->whereDate('date', $dateFiltre);
-        }
-
-        $totalOrdonnances = $queryCount->count();
-
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'ordonnances' => $ordonnances->items(),
-                'pagination' => [
-                    'current_page' => $ordonnances->currentPage(),
-                    'last_page' => $ordonnances->lastPage(),
-                    'per_page' => $ordonnances->perPage(),
-                    'total' => $ordonnances->total(),
-                    'from' => $ordonnances->firstItem(),
-                    'to' => $ordonnances->lastItem(),
-                ],
-                'total_ordonnances' => $totalOrdonnances,
-                'medicament_recherche' => $medicament,
-                'date_filtre' => $dateFiltre,
-                'criteres_recherche' => [
-                    'par_medicament' => !empty($medicament),
-                    'par_date' => !empty($dateFiltre),
-                    'les_deux' => !empty($medicament) && !empty($dateFiltre)
-                ]
-            ],
-            'message' => 'Historique récupéré avec succès'
-        ]);
-
-    } catch (ValidationException $e) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Paramètres de recherche invalides',
-            'errors' => $e->errors()
-        ], 422);
-    } catch (Exception $e) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Erreur lors de la récupération de l\'historique',
-            'error' => config('app.debug') ? $e->getMessage() : 'Erreur serveur'
-        ], 500);
     }
-}
 
     /**
-     * MODIFICATION 2 & 5: Récupérer la liste des médecins pour sélection 
-     * Format: "Nom Complet (ONM)"
+     * Récupérer l'historique des ordonnances par médicament et/ou par date
+     * AUTOMATIQUEMENT filtrée par le dossier sélectionné
+     */
+    public function getHistoriqueParMedicament(Request $request): JsonResponse
+    {
+        // Vérifier la sélection du dossier
+        $folderCheck = $this->checkDossierSelection($request);
+        if ($folderCheck) return $folderCheck;
+
+        try {
+            $validated = $request->validate([
+                'medicament' => 'nullable|string',
+                'date' => 'nullable|date',
+                'page' => 'nullable|integer|min:1',
+                'per_page' => 'nullable|integer|min:1|max:100'
+            ]);
+
+            $perPage = $validated['per_page'] ?? 10;
+            $medicament = $validated['medicament'] ?? null;
+            $dateFiltre = $validated['date'] ?? null;
+            $currentDossier = $request->get('current_dossier_vente');
+
+            if (!$medicament && !$dateFiltre) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Veuillez fournir au moins un critère de recherche (médicament ou date)',
+                    'errors' => ['criteres' => 'Au moins un critère de recherche est requis']
+                ], 422);
+            }
+
+            // Le global scope filtre automatiquement par dossier
+            $query = Ordonnance::with(['medecin', 'client', 'lignes']);
+
+            if ($medicament) {
+                $query->whereHas('lignes', function ($q) use ($medicament) {
+                    $q->where('designation', $medicament);
+                });
+            }
+
+            if ($dateFiltre) {
+                $query->whereDate('date', $dateFiltre);
+            }
+
+            $ordonnances = $query->orderBy('date', 'desc')->orderBy('created_at', 'desc')
+                                ->paginate($perPage);
+
+            // Compter le total avec les mêmes critères
+            $queryCount = Ordonnance::query();
+            
+            if ($medicament) {
+                $queryCount->whereHas('lignes', function ($q) use ($medicament) {
+                    $q->where('designation', $medicament);
+                });
+            }
+
+            if ($dateFiltre) {
+                $queryCount->whereDate('date', $dateFiltre);
+            }
+
+            $totalOrdonnances = $queryCount->count();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'ordonnances' => $ordonnances->items(),
+                    'pagination' => [
+                        'current_page' => $ordonnances->currentPage(),
+                        'last_page' => $ordonnances->lastPage(),
+                        'per_page' => $ordonnances->perPage(),
+                        'total' => $ordonnances->total(),
+                        'from' => $ordonnances->firstItem(),
+                        'to' => $ordonnances->lastItem(),
+                    ],
+                    'total_ordonnances' => $totalOrdonnances,
+                    'medicament_recherche' => $medicament,
+                    'date_filtre' => $dateFiltre,
+                    'current_dossier' => $currentDossier,
+                    'criteres_recherche' => [
+                        'par_medicament' => !empty($medicament),
+                        'par_date' => !empty($dateFiltre),
+                        'les_deux' => !empty($medicament) && !empty($dateFiltre)
+                    ]
+                ],
+                'message' => 'Historique récupéré avec succès'
+            ]);
+
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Paramètres de recherche invalides',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la récupération de l\'historique',
+                'error' => config('app.debug') ? $e->getMessage() : 'Erreur serveur'
+            ], 500);
+        }
+    }
+
+    /**
+     * Récupérer la liste des médecins pour sélection 
      */
     public function getMedecinsForSelection(): JsonResponse
     {
@@ -484,6 +526,81 @@ public function getHistoriqueParMedicament(Request $request): JsonResponse
             return response()->json([
                 'success' => false,
                 'message' => 'Erreur lors de la récupération des médecins',
+                'error' => config('app.debug') ? $e->getMessage() : 'Erreur serveur'
+            ], 500);
+        }
+    }
+
+    /**
+     * NOUVELLE MÉTHODE : Suggérer un numéro d'ordonnance pour le dossier actuel
+     */
+    public function suggestNumeroOrdonnance(Request $request): JsonResponse
+    {
+        // Vérifier la sélection du dossier
+        $folderCheck = $this->checkDossierSelection($request);
+        if ($folderCheck) return $folderCheck;
+
+        try {
+            $currentDossier = $request->get('current_dossier_vente');
+            $suggestion = Ordonnance::suggestNumeroOrdonnance($currentDossier);
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'numero_suggere' => $suggestion,
+                    'dossier' => $currentDossier
+                ],
+                'message' => 'Numéro d\'ordonnance suggéré'
+            ]);
+
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la suggestion du numéro',
+                'error' => config('app.debug') ? $e->getMessage() : 'Erreur serveur'
+            ], 500);
+        }
+    }
+
+    /**
+     * NOUVELLE MÉTHODE : Statistiques du dossier actuel
+     */
+    public function getStatistiquesDossier(Request $request): JsonResponse
+    {
+        // Vérifier la sélection du dossier
+        $folderCheck = $this->checkDossierSelection($request);
+        if ($folderCheck) return $folderCheck;
+
+        try {
+            $currentDossier = $request->get('current_dossier_vente');
+            $dossierInfo = $request->get('dossier_info', []);
+
+            $stats = [
+                'dossier_nom' => $currentDossier,
+                'dossier_info' => $dossierInfo,
+                'total_ordonnances' => Ordonnance::count(),
+                'ordonnances_ce_mois' => Ordonnance::whereMonth('date', now()->month)
+                                                  ->whereYear('date', now()->year)
+                                                  ->count(),
+                'ordonnances_aujourd_hui' => Ordonnance::whereDate('date', today())->count(),
+                'derniere_ordonnance' => Ordonnance::orderBy('created_at', 'desc')->first(),
+                'medicaments_uniques' => DB::table('ordonnance_lignes')
+                    ->join('ordonnances', 'ordonnance_lignes.ordonnance_id', '=', 'ordonnances.id')
+                    ->where('ordonnances.dossier_vente', $currentDossier)
+                    ->distinct('ordonnance_lignes.designation')
+                    ->count('ordonnance_lignes.designation')
+            ];
+
+            return response()->json([
+                'success' => true,
+                'data' => $stats,
+                'message' => 'Statistiques du dossier récupérées'
+            ]);
+
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la récupération des statistiques',
                 'error' => config('app.debug') ? $e->getMessage() : 'Erreur serveur'
             ], 500);
         }

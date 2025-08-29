@@ -12,7 +12,8 @@ class Ordonnance extends Model
     use HasFactory;
 
     protected $fillable = [
-        'numero_ordonnance', // MODIFICATION 1: Maintenu mais plus d'auto-génération
+        'numero_ordonnance',
+        'dossier_vente', // NOUVEAU : dossier de vente
         'date',
         'medecin_id',
         'client_id'
@@ -38,7 +39,25 @@ class Ordonnance extends Model
         return $this->hasMany(OrdonnanceLigne::class);
     }
 
-    // Scopes
+    // GLOBAL SCOPE : Automatiquement filtrer par dossier actif
+    protected static function booted()
+    {
+        static::addGlobalScope('dossier_vente', function (Builder $builder) {
+            // Récupérer le dossier actuel depuis la request
+            if (request() && request()->has('current_dossier_vente')) {
+                $builder->where('dossier_vente', request()->get('current_dossier_vente'));
+            }
+        });
+
+        // Automatiquement ajouter le dossier lors de la création
+        static::creating(function ($ordonnance) {
+            if (!$ordonnance->dossier_vente && request() && request()->has('current_dossier_vente')) {
+                $ordonnance->dossier_vente = request()->get('current_dossier_vente');
+            }
+        });
+    }
+
+    // Scopes existants (inchangés)
     public function scopeSearch(Builder $query, string $search = null)
     {
         if ($search) {
@@ -80,7 +99,19 @@ class Ordonnance extends Model
         return $query;
     }
 
-    // Accesseurs
+    // NOUVEAU : Scope pour forcer un dossier spécifique (sans le global scope)
+    public function scopeInDossier(Builder $query, string $dossierVente)
+    {
+        return $query->withoutGlobalScope('dossier_vente')->where('dossier_vente', $dossierVente);
+    }
+
+    // NOUVEAU : Scope pour voir toutes les ordonnances (tous dossiers)
+    public function scopeAllDossiers(Builder $query)
+    {
+        return $query->withoutGlobalScope('dossier_vente');
+    }
+
+    // Accesseurs (inchangés)
     public function getFormattedDateAttribute()
     {
         return $this->date->format('d/m/Y');
@@ -96,15 +127,25 @@ class Ordonnance extends Model
         return $this->lignes()->count();
     }
 
-    // MODIFICATION 1: Méthode conservée mais optionnelle pour suggestion
-    // Cette méthode peut être utilisée côté frontend pour suggérer un numéro
-    public static function suggestNumeroOrdonnance()
+    // MODIFIÉ : Suggestion de numéro par dossier
+    public static function suggestNumeroOrdonnance($dossierVente = null)
     {
         $today = Carbon::now();
         $prefix = 'ORD' . $today->format('Ymd');
         
-        // Trouver le dernier numéro du jour
-        $lastOrdonnance = static::where('numero_ordonnance', 'LIKE', $prefix . '%')
+        // Utiliser le dossier actuel si pas spécifié
+        if (!$dossierVente && request() && request()->has('current_dossier_vente')) {
+            $dossierVente = request()->get('current_dossier_vente');
+        }
+        
+        if (!$dossierVente) {
+            return $prefix . '001'; // Fallback si pas de dossier
+        }
+        
+        // Trouver le dernier numéro du jour DANS CE DOSSIER
+        $lastOrdonnance = static::allDossiers()
+                               ->where('dossier_vente', $dossierVente)
+                               ->where('numero_ordonnance', 'LIKE', $prefix . '%')
                                ->orderBy('numero_ordonnance', 'desc')
                                ->first();
         
@@ -118,9 +159,20 @@ class Ordonnance extends Model
         return $prefix . $newNumber;
     }
 
-    // MODIFICATION 4: Méthode pour vérifier si le numéro existe déjà
-    public static function numeroExists($numero)
+    // MODIFIÉ : Vérifier l'existence du numéro dans le dossier actuel
+    public static function numeroExists($numero, $dossierVente = null)
     {
-        return static::where('numero_ordonnance', $numero)->exists();
+        if (!$dossierVente && request() && request()->has('current_dossier_vente')) {
+            $dossierVente = request()->get('current_dossier_vente');
+        }
+        
+        if (!$dossierVente) {
+            return false; // Si pas de dossier, on ne peut pas vérifier
+        }
+        
+        return static::allDossiers()
+                    ->where('numero_ordonnance', $numero)
+                    ->where('dossier_vente', $dossierVente)
+                    ->exists();
     }
 }
