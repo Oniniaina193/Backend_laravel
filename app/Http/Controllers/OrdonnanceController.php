@@ -359,6 +359,383 @@ class OrdonnanceController extends Controller
         }
     }
 
+/**
+ * Générer une version imprimable HTML de l'ordonnance
+ */
+public function generatePrintableHtml(Ordonnance $ordonnance): JsonResponse
+{
+    try {
+        // Charger toutes les relations nécessaires
+        $ordonnance->load(['medecin', 'client', 'lignes']);
+
+        // Générer le HTML formaté pour l'impression
+        $html = $this->buildPrintableHtml($ordonnance);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'html' => $html,
+                'ordonnance' => $ordonnance,
+                'print_date' => now()->format('d/m/Y à H:i')
+            ],
+            'message' => 'Version imprimable générée avec succès'
+        ]);
+
+    } catch (Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Erreur lors de la génération de l\'ordonnance imprimable',
+            'error' => config('app.debug') ? $e->getMessage() : 'Erreur serveur'
+        ], 500);
+    }
+}
+
+/**
+ * Construire le HTML formaté pour l'impression
+ */
+private function buildPrintableHtml(Ordonnance $ordonnance): string
+{
+    $html = '
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Ordonnance ' . htmlspecialchars($ordonnance->numero_ordonnance) . '</title>
+        <style>
+            @media print {
+                @page {
+                    margin: 1cm;
+                    size: A4;
+                }
+                body { margin: 0; }
+                .no-print { display: none !important; }
+            }
+            
+            body {
+                font-family: "Arial", sans-serif;
+                font-size: 12pt;
+                line-height: 1.4;
+                color: #000;
+                max-width: 21cm;
+                margin: 0 auto;
+                padding: 1cm;
+                background: white;
+            }
+            
+            .ordonnance-header {
+                text-align: center;
+                border-bottom: 2px solid #2563eb;
+                padding-bottom: 15px;
+                margin-bottom: 25px;
+            }
+            
+            .ordonnance-title {
+                font-size: 24pt;
+                font-weight: bold;
+                color: #1e40af;
+                margin-bottom: 5px;
+            }
+            
+            .ordonnance-subtitle {
+                font-size: 14pt;
+                color: #6b7280;
+                margin-bottom: 15px;
+            }
+            
+            .ordonnance-info {
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 25px;
+                gap: 20px;
+            }
+            
+            .info-section {
+                flex: 1;
+            }
+            
+            .info-section h3 {
+                font-size: 14pt;
+                font-weight: bold;
+                color: #1f2937;
+                margin-bottom: 8px;
+                border-bottom: 1px solid #e5e7eb;
+                padding-bottom: 3px;
+            }
+            
+            .info-section p {
+                margin: 4px 0;
+                font-size: 11pt;
+            }
+            
+            .info-label {
+                font-weight: bold;
+                display: inline-block;
+                width: 80px;
+            }
+            
+            .medicaments-section {
+                margin-top: 30px;
+            }
+            
+            .medicaments-title {
+                font-size: 16pt;
+                font-weight: bold;
+                color: #1f2937;
+                margin-bottom: 15px;
+                text-align: center;
+                background-color: #f3f4f6;
+                padding: 8px;
+                border-radius: 4px;
+            }
+            
+            .medicament-item {
+                border: 1px solid #d1d5db;
+                border-radius: 6px;
+                padding: 15px;
+                margin-bottom: 12px;
+                background-color: #fafafa;
+                page-break-inside: avoid;
+            }
+            
+            .medicament-name {
+                font-size: 13pt;
+                font-weight: bold;
+                color: #1f2937;
+                margin-bottom: 8px;
+            }
+            
+            .medicament-details {
+                display: grid;
+                grid-template-columns: 1fr 1fr 1fr;
+                gap: 15px;
+                font-size: 11pt;
+            }
+            
+            .detail-item {
+                display: flex;
+                flex-direction: column;
+            }
+            
+            .detail-label {
+                font-weight: bold;
+                color: #4b5563;
+                font-size: 10pt;
+                margin-bottom: 2px;
+            }
+            
+            .detail-value {
+                color: #1f2937;
+                font-size: 11pt;
+            }
+            
+            .ordonnance-footer {
+                margin-top: 40px;
+                display: flex;
+                justify-content: space-between;
+                align-items: end;
+                border-top: 1px solid #e5e7eb;
+                padding-top: 20px;
+            }
+            
+            .signature-section {
+                text-align: center;
+                width: 200px;
+            }
+            
+            .signature-label {
+                font-size: 11pt;
+                font-weight: bold;
+                margin-bottom: 40px;
+                color: #4b5563;
+            }
+            
+            .signature-line {
+                border-bottom: 1px solid #000;
+                width: 180px;
+                margin: 0 auto;
+            }
+            
+            .print-info {
+                font-size: 9pt;
+                color: #6b7280;
+                text-align: left;
+            }
+            
+            .prescription-note {
+                background-color: #fef3c7;
+                border: 1px solid #f59e0b;
+                border-radius: 4px;
+                padding: 10px;
+                margin: 20px 0;
+                font-size: 10pt;
+                color: #92400e;
+            }
+            
+            @media print {
+                .ordonnance-info {
+                    display: table;
+                    width: 100%;
+                }
+                .info-section {
+                    display: table-cell;
+                    vertical-align: top;
+                    padding-right: 20px;
+                }
+                .medicament-details {
+                    display: table;
+                    width: 100%;
+                }
+                .detail-item {
+                    display: table-cell;
+                    padding-right: 15px;
+                    vertical-align: top;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="ordonnance-container">
+            <!-- En-tête -->
+            <div class="ordonnance-header">
+                <h1 class="ordonnance-title">ORDONNANCE MÉDICALE</h1>
+                <p class="ordonnance-subtitle">Prescription médicamenteuse</p>
+            </div>
+            
+            <!-- Informations principales -->
+            <div class="ordonnance-info">
+                <!-- Médecin prescripteur -->
+                <div class="info-section">
+                    <h3>Médecin prescripteur</h3>
+                    <p><span class="info-label">Dr.</span> ' . htmlspecialchars($ordonnance->medecin->nom_complet) . '</p>
+                    <p><span class="info-label">ONM:</span> ' . htmlspecialchars($ordonnance->medecin->ONM) . '</p>';
+    
+    if ($ordonnance->medecin->adresse) {
+        $html .= '<p><span class="info-label">Adresse:</span> ' . htmlspecialchars($ordonnance->medecin->adresse) . '</p>';
+    }
+    
+    if ($ordonnance->medecin->telephone) {
+        $html .= '<p><span class="info-label">Tél:</span> ' . htmlspecialchars($ordonnance->medecin->telephone) . '</p>';
+    }
+    
+    $html .= '
+                </div>
+                
+                <!-- Patient -->
+                <div class="info-section">
+                    <h3>Patient</h3>
+                    <p><span class="info-label">Nom:</span> ' . htmlspecialchars($ordonnance->client->nom_complet) . '</p>
+                    <p><span class="info-label">Adresse:</span> ' . htmlspecialchars($ordonnance->client->adresse) . '</p>';
+    
+    if ($ordonnance->client->telephone) {
+        $html .= '<p><span class="info-label">Tél:</span> ' . htmlspecialchars($ordonnance->client->telephone) . '</p>';
+    }
+    
+    $html .= '
+                </div>
+                
+                <!-- Ordonnance -->
+                <div class="info-section">
+                    <h3>Ordonnance</h3>
+                    <p><span class="info-label">N°:</span> ' . htmlspecialchars($ordonnance->numero_ordonnance) . '</p>
+                    <p><span class="info-label">Date:</span> ' . $ordonnance->date->format('d/m/Y') . '</p>
+                    <p><span class="info-label">Dossier:</span> ' . htmlspecialchars($ordonnance->dossier_vente) . '</p>
+                </div>
+            </div>
+            
+            <!-- Note de prescription -->
+            <div class="prescription-note">
+                <strong>Important:</strong> Cette ordonnance doit être présentée dans les 3 mois suivant sa date d\'établissement. 
+                Respectez scrupuleusement les posologies et durées prescrites.
+            </div>
+            
+            <!-- Médicaments prescrits -->
+            <div class="medicaments-section">
+                <h2 class="medicaments-title">MÉDICAMENTS PRESCRITS</h2>';
+    
+    foreach ($ordonnance->lignes as $index => $ligne) {
+        $html .= '
+                <div class="medicament-item">
+                    <div class="medicament-name">' . ($index + 1) . '. ' . htmlspecialchars($ligne->designation) . '</div>
+                    <div class="medicament-details">
+                        <div class="detail-item">
+                            <span class="detail-label">Quantité</span>
+                            <span class="detail-value">' . htmlspecialchars($ligne->quantite) . '</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Posologie</span>
+                            <span class="detail-value">' . htmlspecialchars($ligne->posologie) . '</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Durée</span>
+                            <span class="detail-value">' . htmlspecialchars($ligne->duree) . '</span>
+                        </div>
+                    </div>
+                </div>';
+    }
+    
+    $html .= '
+            </div>
+            
+            <!-- Pied de page -->
+            <div class="ordonnance-footer">
+                <div class="print-info">
+                    <p>Imprimé le ' . now()->format('d/m/Y à H:i') . '</p>
+                    <p>Système de gestion pharmaceutique</p>
+                </div>
+                
+                <div class="signature-section">
+                    <p class="signature-label">Signature et cachet du médecin</p>
+                    <div class="signature-line"></div>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>';
+    
+    return $html;
+}
+
+/**
+ * OPTIONNEL : Générer un PDF de l'ordonnance
+ * Nécessite l'installation de dompdf : composer require dompdf/dompdf
+ */
+public function generatePdf(Ordonnance $ordonnance)
+{
+    try {
+        // Charger les relations
+        $ordonnance->load(['medecin', 'client', 'lignes']);
+        
+        // Générer le HTML
+        $html = $this->buildPrintableHtml($ordonnance);
+        
+        // Créer le PDF avec DomPDF
+        $pdf = new \Dompdf\Dompdf([
+            'defaultFont' => 'Arial',
+            'isRemoteEnabled' => false,
+            'isPhpEnabled' => false
+        ]);
+        
+        $pdf->loadHtml($html);
+        $pdf->setPaper('A4', 'portrait');
+        $pdf->render();
+        
+        // Nom du fichier
+        $filename = 'ordonnance_' . $ordonnance->numero_ordonnance . '_' . date('Y-m-d') . '.pdf';
+        
+        return response($pdf->output(), 200)
+            ->header('Content-Type', 'application/pdf')
+            ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
+            
+    } catch (Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Erreur lors de la génération du PDF',
+            'error' => config('app.debug') ? $e->getMessage() : 'Erreur serveur'
+        ], 500);
+    }
+}
+
     /**
      * Récupérer la liste des médicaments qui ont des ordonnances
      * AUTOMATIQUEMENT filtrée par le dossier sélectionné
@@ -605,4 +982,490 @@ class OrdonnanceController extends Controller
             ], 500);
         }
     }
+
+// Ajoutez ces méthodes à votre OrdonnanceController.php
+
+/**
+ * Exporter la liste des ordonnances de l'historique en PDF
+ */
+public function exportHistoriqueList(Request $request)
+{
+    // Vérifier la sélection du dossier
+    $folderCheck = $this->checkDossierSelection($request);
+    if ($folderCheck) return $folderCheck;
+
+    try {
+        $validated = $request->validate([
+            'medicament' => 'nullable|string',
+            'date' => 'nullable|date',
+            'titre' => 'nullable|string',
+            'format' => 'nullable|string|in:pdf'
+        ]);
+
+        $medicament = $validated['medicament'] ?? null;
+        $dateFiltre = $validated['date'] ?? null;
+        $titre = $validated['titre'] ?? 'Liste des ordonnances';
+        $currentDossier = $request->get('current_dossier_vente');
+
+        if (!$medicament && !$dateFiltre) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Au moins un critère de recherche est requis (médicament ou date)'
+            ], 422);
+        }
+
+        // Récupérer les ordonnances avec les mêmes critères que l'historique
+        $query = Ordonnance::with(['medecin', 'client', 'lignes']);
+
+        if ($medicament) {
+            $query->whereHas('lignes', function ($q) use ($medicament) {
+                $q->where('designation', $medicament);
+            });
+        }
+
+        if ($dateFiltre) {
+            $query->whereDate('date', $dateFiltre);
+        }
+
+        $ordonnances = $query->orderBy('date', 'desc')
+                            ->orderBy('created_at', 'desc')
+                            ->get();
+
+        if ($ordonnances->isEmpty()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Aucune ordonnance trouvée pour ces critères'
+            ], 404);
+        }
+
+        // Générer le HTML pour la liste
+        $html = $this->buildHistoriqueListHtml($ordonnances, $titre, $medicament, $dateFiltre, $currentDossier);
+
+        // Si c'est un export PDF, utiliser DomPDF
+        if ($validated['format'] === 'pdf') {
+            // Vérifier si DomPDF est installé
+            if (!class_exists('\Dompdf\Dompdf')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'PDF export non disponible. Veuillez installer dompdf: composer require dompdf/dompdf'
+                ], 500);
+            }
+
+            $pdf = new \Dompdf\Dompdf([
+                'defaultFont' => 'Arial',
+                'isRemoteEnabled' => false,
+                'isPhpEnabled' => false
+            ]);
+            
+            $pdf->loadHtml($html);
+            $pdf->setPaper('A4', 'portrait');
+            $pdf->render();
+            
+            $filename = 'historique_ordonnances_' . date('Y-m-d_H-i-s') . '.pdf';
+            
+            return response($pdf->output(), 200)
+                ->header('Content-Type', 'application/pdf')
+                ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'html' => $html,
+                'total_ordonnances' => $ordonnances->count(),
+                'criteres' => [
+                    'medicament' => $medicament,
+                    'date' => $dateFiltre,
+                    'dossier' => $currentDossier
+                ]
+            ],
+            'message' => 'Export généré avec succès'
+        ]);
+
+    } catch (ValidationException $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Paramètres invalides',
+            'errors' => $e->errors()
+        ], 422);
+    } catch (Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Erreur lors de l\'export',
+            'error' => config('app.debug') ? $e->getMessage() : 'Erreur serveur'
+        ], 500);
+    }
+}
+
+/**
+ * Imprimer la liste des ordonnances de l'historique
+ */
+public function printHistoriqueList(Request $request)
+{
+    // Vérifier la sélection du dossier
+    $folderCheck = $this->checkDossierSelection($request);
+    if ($folderCheck) return $folderCheck;
+
+    try {
+        $validated = $request->validate([
+            'medicament' => 'nullable|string',
+            'date' => 'nullable|date',
+            'titre' => 'nullable|string'
+        ]);
+
+        $medicament = $validated['medicament'] ?? null;
+        $dateFiltre = $validated['date'] ?? null;
+        $titre = $validated['titre'] ?? 'Liste des ordonnances';
+        $currentDossier = $request->get('current_dossier_vente');
+
+        if (!$medicament && !$dateFiltre) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Au moins un critère de recherche est requis (médicament ou date)'
+            ], 422);
+        }
+
+        // Récupérer les ordonnances
+        $query = Ordonnance::with(['medecin', 'client', 'lignes']);
+
+        if ($medicament) {
+            $query->whereHas('lignes', function ($q) use ($medicament) {
+                $q->where('designation', $medicament);
+            });
+        }
+
+        if ($dateFiltre) {
+            $query->whereDate('date', $dateFiltre);
+        }
+
+        $ordonnances = $query->orderBy('date', 'desc')
+                            ->orderBy('created_at', 'desc')
+                            ->get();
+
+        if ($ordonnances->isEmpty()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Aucune ordonnance trouvée pour ces critères'
+            ], 404);
+        }
+
+        // Générer le HTML imprimable
+        $html = $this->buildHistoriqueListHtml($ordonnances, $titre, $medicament, $dateFiltre, $currentDossier);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'html' => $html,
+                'total_ordonnances' => $ordonnances->count()
+            ],
+            'message' => 'Liste préparée pour impression'
+        ]);
+
+    } catch (ValidationException $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Paramètres invalides',
+            'errors' => $e->errors()
+        ], 422);
+    } catch (Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Erreur lors de la préparation d\'impression',
+            'error' => config('app.debug') ? $e->getMessage() : 'Erreur serveur'
+        ], 500);
+    }
+}
+
+/**
+ * Construire le HTML pour la liste de l'historique
+ */
+private function buildHistoriqueListHtml($ordonnances, $titre, $medicament = null, $dateFiltre = null, $dossier = null)
+{
+    $totalOrdonnances = $ordonnances->count();
+    $dateGeneration = now()->format('d/m/Y à H:i');
+    
+    // Construire les critères de recherche pour l'affichage
+    $criteres = [];
+    if ($medicament) {
+        $criteres[] = "Médicament: " . $medicament;
+    }
+    if ($dateFiltre) {
+        $criteres[] = "Date: " . \Carbon\Carbon::parse($dateFiltre)->format('d/m/Y');
+    }
+    if ($dossier && $dossier !== 'default') {
+        $criteres[] = "Dossier: " . $dossier;
+    }
+    
+    $criteresText = implode(' | ', $criteres);
+
+    $html = '
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>' . htmlspecialchars($titre) . '</title>
+        <style>
+            @media print {
+                @page {
+                    margin: 1.5cm;
+                    size: A4;
+                }
+                body { margin: 0; }
+                .no-print { display: none !important; }
+                .page-break { page-break-before: always; }
+                table { page-break-inside: auto; }
+                tr { page-break-inside: avoid; page-break-after: auto; }
+                thead { display: table-header-group; }
+                tfoot { display: table-footer-group; }
+            }
+            
+            body {
+                font-family: "Arial", sans-serif;
+                font-size: 11pt;
+                line-height: 1.4;
+                color: #000;
+                max-width: 100%;
+                margin: 0;
+                padding: 0;
+                background: white;
+            }
+            
+            .container {
+                max-width: 21cm;
+                margin: 0 auto;
+                padding: 1cm;
+            }
+            
+            .header {
+                text-align: center;
+                border-bottom: 2px solid #2563eb;
+                padding-bottom: 15px;
+                margin-bottom: 20px;
+            }
+            
+            .header h1 {
+                font-size: 20pt;
+                font-weight: bold;
+                color: #1e40af;
+                margin: 0 0 8px 0;
+            }
+            
+            .header .criteres {
+                font-size: 12pt;
+                color: #4b5563;
+                margin: 5px 0;
+            }
+            
+            .header .total {
+                font-size: 13pt;
+                font-weight: bold;
+                color: #059669;
+                margin: 8px 0;
+            }
+            
+            .meta-info {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 20px;
+                padding: 10px;
+                background-color: #f8fafc;
+                border-radius: 4px;
+                font-size: 10pt;
+                color: #6b7280;
+            }
+            
+            .table-container {
+                overflow-x: auto;
+            }
+            
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin: 0;
+                font-size: 10pt;
+                background: white;
+            }
+            
+            thead th {
+                background-color: #1f2937;
+                color: white;
+                font-weight: bold;
+                text-align: center;
+                padding: 8px 6px;
+                border: 1px solid #374151;
+                font-size: 9pt;
+            }
+            
+            tbody td {
+                padding: 6px;
+                border: 1px solid #d1d5db;
+                text-align: center;
+                vertical-align: middle;
+                font-size: 9pt;
+            }
+            
+            tbody tr:nth-child(even) {
+                background-color: #f9fafb;
+            }
+            
+            tbody tr:hover {
+                background-color: #e5f3ff;
+            }
+            
+            .ordonnance-numero {
+                font-weight: bold;
+                color: #1e40af;
+            }
+            
+            .client-nom {
+                font-weight: 600;
+                color: #1f2937;
+            }
+            
+            .medicament-principal {
+                font-weight: 500;
+                color: #059669;
+            }
+            
+            .date-ordonnance {
+                font-weight: 500;
+                color: #7c2d12;
+            }
+            
+            .medicaments-list {
+                text-align: left;
+                max-width: 250px;
+            }
+            
+            .medicament-item {
+                margin: 2px 0;
+                padding: 2px 4px;
+                background-color: #e0f2fe;
+                border-radius: 3px;
+                font-size: 8pt;
+                display: inline-block;
+                margin-right: 4px;
+            }
+            
+            .footer {
+                margin-top: 30px;
+                border-top: 1px solid #e5e7eb;
+                padding-top: 15px;
+                text-align: center;
+                font-size: 9pt;
+                color: #6b7280;
+            }
+            
+            .summary-box {
+                background-color: #ecfdf5;
+                border: 1px solid #10b981;
+                border-radius: 6px;
+                padding: 12px;
+                margin-bottom: 20px;
+                text-align: center;
+            }
+            
+            .summary-title {
+                font-size: 12pt;
+                font-weight: bold;
+                color: #065f46;
+                margin-bottom: 5px;
+            }
+            
+            .summary-text {
+                font-size: 10pt;
+                color: #047857;
+            }
+            
+            @media print {
+                .table-container {
+                    overflow: visible;
+                }
+                table {
+                    font-size: 9pt;
+                }
+                thead th {
+                    font-size: 8pt;
+                    padding: 6px 4px;
+                }
+                tbody td {
+                    font-size: 8pt;
+                    padding: 4px;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <!-- En-tête -->
+            <div class="header">
+                <h1>' . htmlspecialchars($titre) . '</h1>
+                <div class="criteres">' . htmlspecialchars($criteresText) . '</div>
+                <div class="total">Total: ' . $totalOrdonnances . ' ordonnance(s)</div>
+            </div>
+            
+            <!-- Informations de génération -->
+            <div class="meta-info">
+                <div>Généré le ' . $dateGeneration . '</div>
+                <div>Système de gestion pharmaceutique</div>
+            </div>
+            
+            <!-- Résumé -->
+            <div class="summary-box">
+                <div class="summary-title">Résumé de la recherche</div>
+                <div class="summary-text">' . htmlspecialchars($criteresText) . '</div>
+            </div>
+            
+            <!-- Tableau des ordonnances -->
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 12%;">N° Ordonnance</th>
+                            <th style="width: 18%;">Patient</th>
+                            <th style="width: 15%;">Médecin</th>
+                            <th style="width: 12%;">Date</th>
+                            <th style="width: 43%;">Médicaments prescrits</th>
+                        </tr>
+                    </thead>
+                    <tbody>';
+
+    foreach ($ordonnances as $ordonnance) {
+        $medicamentsList = '';
+        foreach ($ordonnance->lignes as $ligne) {
+            $medicamentsList .= '<span class="medicament-item">' . 
+                               htmlspecialchars($ligne->designation) . 
+                               ' (Qté: ' . $ligne->quantite . ')</span>';
+        }
+
+        $html .= '
+                        <tr>
+                            <td class="ordonnance-numero">' . htmlspecialchars($ordonnance->numero_ordonnance) . '</td>
+                            <td class="client-nom">' . htmlspecialchars($ordonnance->client->nom_complet) . '</td>
+                            <td>Dr. ' . htmlspecialchars($ordonnance->medecin->nom_complet) . '</td>
+                            <td class="date-ordonnance">' . $ordonnance->date->format('d/m/Y') . '</td>
+                            <td class="medicaments-list">' . $medicamentsList . '</td>
+                        </tr>';
+    }
+
+    $html .= '
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Pied de page -->
+            <div class="footer">
+                <p><strong>Statistiques:</strong></p>
+                <p>Total des ordonnances: ' . $totalOrdonnances . '</p>
+                <p>Période analysée: ' . ($dateFiltre ? \Carbon\Carbon::parse($dateFiltre)->format('d/m/Y') : 'Toutes les dates') . '</p>
+                <p>Document généré le ' . $dateGeneration . '</p>
+            </div>
+        </div>
+    </body>
+    </html>';
+
+    return $html;
+}
 }
