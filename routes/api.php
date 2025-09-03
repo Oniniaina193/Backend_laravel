@@ -144,3 +144,10 @@ Route::prefix('statistiques')->middleware(['web'])->group(function () {
     Route::get('/top-medicaments', [StatistiquesController::class, 'getTopMedicaments'])
          ->name('statistiques.top.medicaments');
 });
+
+// Routes pour la surveillance des fichiers
+Route::prefix('file-watcher')->group(function () {
+    Route::get('/check-changes', [FileWatcherController::class, 'checkChanges']);
+    Route::post('/reset', [FileWatcherController::class, 'resetWatcher']);
+    Route::get('/status', [FileWatcherController::class, 'getWatcherStatus']);
+});
