@@ -599,7 +599,6 @@ private function buildPrintableHtml(Ordonnance $ordonnance): string
             <!-- En-tête -->
             <div class="ordonnance-header">
                 <h1 class="ordonnance-title">ORDONNANCE MÉDICALE</h1>
-                <p class="ordonnance-subtitle">Prescription médicamenteuse</p>
             </div>
             
             <!-- Informations principales -->
@@ -641,12 +640,6 @@ private function buildPrintableHtml(Ordonnance $ordonnance): string
                     <p><span class="info-label">Date:</span> ' . $ordonnance->date->format('d/m/Y') . '</p>
                     <p><span class="info-label">Dossier:</span> ' . htmlspecialchars($ordonnance->dossier_vente) . '</p>
                 </div>
-            </div>
-            
-            <!-- Note de prescription -->
-            <div class="prescription-note">
-                <strong>Important:</strong> Cette ordonnance doit être présentée dans les 3 mois suivant sa date d\'établissement. 
-                Respectez scrupuleusement les posologies et durées prescrites.
             </div>
             
             <!-- Médicaments prescrits -->
@@ -983,8 +976,6 @@ public function generatePdf(Ordonnance $ordonnance)
         }
     }
 
-// Ajoutez ces méthodes à votre OrdonnanceController.php
-
 /**
  * Exporter la liste des ordonnances de l'historique en PDF
  */
@@ -1289,7 +1280,7 @@ private function buildHistoriqueListHtml($ordonnances, $titre, $medicament = nul
             }
             
             thead th {
-                background-color: #1f2937;
+                background-color: #d1d5db;
                 color: white;
                 font-weight: bold;
                 text-align: center;
@@ -1411,12 +1402,6 @@ private function buildHistoriqueListHtml($ordonnances, $titre, $medicament = nul
                 <div>Système de gestion pharmaceutique</div>
             </div>
             
-            <!-- Résumé -->
-            <div class="summary-box">
-                <div class="summary-title">Résumé de la recherche</div>
-                <div class="summary-text">' . htmlspecialchars($criteresText) . '</div>
-            </div>
-            
             <!-- Tableau des ordonnances -->
             <div class="table-container">
                 <table>
@@ -1454,13 +1439,6 @@ private function buildHistoriqueListHtml($ordonnances, $titre, $medicament = nul
                 </table>
             </div>
             
-            <!-- Pied de page -->
-            <div class="footer">
-                <p><strong>Statistiques:</strong></p>
-                <p>Total des ordonnances: ' . $totalOrdonnances . '</p>
-                <p>Période analysée: ' . ($dateFiltre ? \Carbon\Carbon::parse($dateFiltre)->format('d/m/Y') : 'Toutes les dates') . '</p>
-                <p>Document généré le ' . $dateGeneration . '</p>
-            </div>
         </div>
     </body>
     </html>';
