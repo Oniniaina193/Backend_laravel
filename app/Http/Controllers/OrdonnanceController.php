@@ -1245,7 +1245,7 @@ private function buildHistoriqueListHtml($ordonnances, $titre, $medicament = nul
             }
             
             .header h1 {
-                font-size: 20pt;
+                font-size: 13pt;
                 font-weight: bold;
                 color: #1e40af;
                 margin: 0 0 8px 0;
@@ -1402,7 +1402,6 @@ private function buildHistoriqueListHtml($ordonnances, $titre, $medicament = nul
             <!-- En-tête -->
             <div class="header">
                 <h1>' . htmlspecialchars($titre) . '</h1>
-                <div class="criteres">' . htmlspecialchars($criteresText) . '</div>
                 <div class="total">Total: ' . $totalOrdonnances . ' ordonnance(s)</div>
             </div>
             

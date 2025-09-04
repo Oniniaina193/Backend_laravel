@@ -89,6 +89,8 @@ class FolderSelectionController extends Controller
                 'article_count' => $articleCount
             ]);
 
+            $this->triggerAutoSync();
+
             return response()->json([
                 'success' => true,
                 'message' => 'Fichier Caiss.mdb uploadé et traité avec succès.',
@@ -159,6 +161,8 @@ class FolderSelectionController extends Controller
                     'provided_path' => $providedPath,
                     'searched_locations' => $searchLocations
                 ]);
+
+                $this->triggerAutoSync();
 
                 return response()->json([
                     'success' => false,
@@ -286,6 +290,31 @@ class FolderSelectionController extends Controller
         ]);
 
         return null;
+    }
+
+    /**
+     * NOUVELLE MÉTHODE À AJOUTER - Déclenche la synchronisation automatique
+     */
+    private function triggerAutoSync(): void
+    {
+        try {
+            // Exécuter la commande en arrière-plan (asynchrone)
+            if (PHP_OS_FAMILY === 'Windows') {
+                // Windows
+                $command = 'start /B php ' . base_path('artisan') . ' sync:selected-folder --auto > NUL 2>&1';
+                pclose(popen($command, 'r'));
+            } else {
+                // Linux/Unix
+                $command = 'php ' . base_path('artisan') . ' sync:selected-folder --auto > /dev/null 2>&1 &';
+                exec($command);
+            }
+            
+            Log::info('Auto sync triggered in background');
+            
+        } catch (Exception $e) {
+            // Ne pas interrompre le processus principal si la sync échoue
+            Log::warning('Failed to trigger auto sync: ' . $e->getMessage());
+        }
     }
 
     //Générer tous les emplacements de recherche possibles
