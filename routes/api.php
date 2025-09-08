@@ -9,6 +9,7 @@ use App\Http\Controllers\MedicamentController;
 use App\Http\Controllers\ClientController;
 use App\Http\Controllers\OrdonnanceController;
 use App\Http\Controllers\StatistiquesController;
+use App\Http\Controllers\OptimizedDirectAccessController;
 use Illuminate\Support\Facades\Route;
 
 // Routes pour la gestion des medecins
@@ -58,6 +59,22 @@ Route::prefix('folder-selection')->group(function () {
          ->name('folder.global-search');
 });
 
+// Groupe de routes optimisées pour l'accueil
+Route::prefix('optimized-direct-access')->group(function () {
+    
+    // Route principale de recherche optimisée
+    Route::get('/search', [OptimizedDirectAccessController::class, 'searchArticles'])
+         ->name('optimized.search.articles');
+    
+    // Test de connexion rapide (optionnel)
+    Route::get('/quick-test', [OptimizedDirectAccessController::class, 'quickConnectionTest'])
+         ->name('optimized.quick.test');
+    
+    // Familles (si nécessaire)
+    Route::get('/families', [OptimizedDirectAccessController::class, 'getFamilies'])
+         ->name('optimized.families');
+});
+
 // Groupe des routes pour accès direct Access (avec stocks)
 Route::prefix('direct-access')->group(function () {
     Route::get('search', [DirectAccessController::class, 'searchArticles'])
@@ -82,6 +99,16 @@ Route::prefix('articles')->group(function () {
          ->name('articles.families');
 });
 
+// Routes pour la mise à jour des données Access
+Route::prefix('data-refresh')->group(function () {
+    Route::post('refresh', [App\Http\Controllers\DataRefreshController::class, 'refreshAllData'])
+         ->name('data-refresh.full');
+    Route::post('quick-refresh', [App\Http\Controllers\DataRefreshController::class, 'quickRefresh'])
+         ->name('data-refresh.quick');
+    Route::get('status', [App\Http\Controllers\DataRefreshController::class, 'getConnectionStatus'])
+         ->name('data-refresh.status');
+});
+
 // Debug et test API
 Route::get('test-session', function () {
     return response()->json([
@@ -103,7 +130,7 @@ Route::prefix('clients')->group(function () {
     Route::get('/', [ClientController::class, 'index']);
     Route::post('/', [ClientController::class, 'store']);
     Route::get('/search', [ClientController::class, 'search']);
-    Route::get('/all', [ClientController::class, 'getAllClients']); // ✅ Correction ici
+    Route::get('/all', [ClientController::class, 'getAllClients']);
     Route::get('/{client}', [ClientController::class, 'show']);
     Route::put('/{client}', [ClientController::class, 'update']);
     Route::delete('/{client}', [ClientController::class, 'destroy']);
@@ -124,9 +151,9 @@ Route::prefix('ordonnances')->group(function () {
     Route::post('/', [OrdonnanceController::class, 'store']);
     Route::get('print/{ordonnance}', [OrdonnanceController::class, 'generatePrintableHtml'])->name('ordonnances.print');
     Route::get('pdf/{ordonnance}', [OrdonnanceController::class, 'generatePdf'])->name('ordonnances.pdf');
-    Route::get('/{ordonnance}', [OrdonnanceController::class, 'show']);  // ✅ Ajout du slash
-    Route::put('/{ordonnance}', [OrdonnanceController::class, 'update']); // ✅ Ajout du slash
-    Route::delete('/{ordonnance}', [OrdonnanceController::class, 'destroy']); // ✅ Ajout du slash
+    Route::get('/{ordonnance}', [OrdonnanceController::class, 'show']); 
+    Route::put('/{ordonnance}', [OrdonnanceController::class, 'update']); 
+    Route::delete('/{ordonnance}', [OrdonnanceController::class, 'destroy']); 
 });
 
 // Routes pour les statistiques - Regroupées sous le préfixe 'statistiques'
