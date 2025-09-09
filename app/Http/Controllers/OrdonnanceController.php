@@ -976,6 +976,303 @@ public function generatePdf(Ordonnance $ordonnance)
         }
     }
 
+// Ajouter ces nouvelles méthodes à votre OrdonnanceController existant
+
+/**
+ * Recherche rapide de médicaments pour l'autocomplétion
+ * OPTIMISÉE pour des suggestions rapides
+ */
+public function searchMedicamentsRapide(Request $request): JsonResponse
+{
+    // Vérifier la sélection du dossier
+    $folderCheck = $this->checkDossierSelection($request);
+    if ($folderCheck) return $folderCheck;
+
+    try {
+        $validated = $request->validate([
+            'q' => 'required|string|min:2|max:100',
+            'limit' => 'nullable|integer|min:1|max:20'
+        ]);
+
+        $query = $validated['q'];
+        $limit = $validated['limit'] ?? 10;
+        $currentDossier = $request->get('current_dossier_vente');
+
+        // Recherche optimisée avec LIKE et index sur designation
+        $medicaments = DB::table('ordonnance_lignes')
+            ->join('ordonnances', 'ordonnance_lignes.ordonnance_id', '=', 'ordonnances.id')
+            ->where('ordonnances.dossier_vente', $currentDossier)
+            ->where('ordonnance_lignes.designation', 'LIKE', '%' . $query . '%')
+            ->select(
+                'ordonnance_lignes.designation',
+                DB::raw('COUNT(DISTINCT ordonnances.id) as total_ordonnances'),
+                DB::raw('MAX(ordonnances.date) as derniere_utilisation')
+            )
+            ->groupBy('ordonnance_lignes.designation')
+            ->orderByRaw('COUNT(DISTINCT ordonnances.id) DESC') // Plus utilisés en premier
+            ->orderBy('ordonnance_lignes.designation')
+            ->limit($limit)
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $medicaments,
+            'query' => $query,
+            'current_dossier' => $currentDossier,
+            'message' => "Suggestions trouvées pour '$query'"
+        ]);
+
+    } catch (ValidationException $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Paramètres de recherche invalides',
+            'errors' => $e->errors()
+        ], 422);
+    } catch (Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Erreur lors de la recherche de médicaments',
+            'error' => config('app.debug') ? $e->getMessage() : 'Erreur serveur'
+        ], 500);
+    }
+}
+
+/**
+ * Récupérer l'historique avec recherche libre de médicaments
+ * SUPPORTE la saisie libre (pas seulement les médicaments existants)
+ */
+public function getHistoriqueParMedicamentLibre(Request $request): JsonResponse
+{
+    // Vérifier la sélection du dossier
+    $folderCheck = $this->checkDossierSelection($request);
+    if ($folderCheck) return $folderCheck;
+
+    try {
+        $validated = $request->validate([
+            'medicament_libre' => 'nullable|string|min:2|max:255',
+            'medicament' => 'nullable|string|max:255', // Recherche exacte (ancienne)
+            'date' => 'nullable|date',
+            'page' => 'nullable|integer|min:1',
+            'per_page' => 'nullable|integer|min:1|max:100'
+        ]);
+
+        $perPage = $validated['per_page'] ?? 10;
+        $medicamentLibre = $validated['medicament_libre'] ?? null;
+        $medicamentExact = $validated['medicament'] ?? null;
+        $dateFiltre = $validated['date'] ?? null;
+        $currentDossier = $request->get('current_dossier_vente');
+
+        // Vérifier qu'au moins un critère est fourni
+        if (!$medicamentLibre && !$medicamentExact && !$dateFiltre) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Veuillez fournir au moins un critère de recherche (médicament ou date)',
+                'errors' => ['criteres' => 'Au moins un critère de recherche est requis']
+            ], 422);
+        }
+
+        // Le global scope filtre automatiquement par dossier
+        $query = Ordonnance::with(['medecin', 'client', 'lignes']);
+
+        // Recherche libre (LIKE) - NOUVELLE FONCTIONNALITÉ
+        if ($medicamentLibre) {
+            $query->whereHas('lignes', function ($q) use ($medicamentLibre) {
+                $q->where('designation', 'LIKE', '%' . $medicamentLibre . '%');
+            });
+            
+            // Ajouter le médicament principal pour l'affichage
+            $query->with(['lignes' => function ($q) use ($medicamentLibre) {
+                $q->where('designation', 'LIKE', '%' . $medicamentLibre . '%');
+            }]);
+        }
+
+        // Recherche exacte (ancienne méthode pour compatibilité)
+        if ($medicamentExact) {
+            $query->whereHas('lignes', function ($q) use ($medicamentExact) {
+                $q->where('designation', $medicamentExact);
+            });
+        }
+
+        // Filtre par date
+        if ($dateFiltre) {
+            $query->whereDate('date', $dateFiltre);
+        }
+
+        $ordonnances = $query->orderBy('date', 'desc')
+                            ->orderBy('created_at', 'desc')
+                            ->paginate($perPage);
+
+        // Compter le total avec les mêmes critères pour les statistiques
+        $queryCount = Ordonnance::query();
+        
+        if ($medicamentLibre) {
+            $queryCount->whereHas('lignes', function ($q) use ($medicamentLibre) {
+                $q->where('designation', 'LIKE', '%' . $medicamentLibre . '%');
+            });
+        }
+
+        if ($medicamentExact) {
+            $queryCount->whereHas('lignes', function ($q) use ($medicamentExact) {
+                $q->where('designation', $medicamentExact);
+            });
+        }
+
+        if ($dateFiltre) {
+            $queryCount->whereDate('date', $dateFiltre);
+        }
+
+        $totalOrdonnances = $queryCount->count();
+
+        // Enrichir les ordonnances avec le médicament principal recherché
+        $ordonnances->getCollection()->transform(function ($ordonnance) use ($medicamentLibre, $medicamentExact) {
+            // Trouver le médicament principal basé sur la recherche
+            if ($medicamentLibre) {
+                $medicamentTrouve = $ordonnance->lignes->first(function ($ligne) use ($medicamentLibre) {
+                    return stripos($ligne->designation, $medicamentLibre) !== false;
+                });
+                $ordonnance->medicament_principal = $medicamentTrouve ? $medicamentTrouve->designation : 'Médicament trouvé';
+            } elseif ($medicamentExact) {
+                $ordonnance->medicament_principal = $medicamentExact;
+            }
+            
+            return $ordonnance;
+        });
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'ordonnances' => $ordonnances->items(),
+                'pagination' => [
+                    'current_page' => $ordonnances->currentPage(),
+                    'last_page' => $ordonnances->lastPage(),
+                    'per_page' => $ordonnances->perPage(),
+                    'total' => $ordonnances->total(),
+                    'from' => $ordonnances->firstItem(),
+                    'to' => $ordonnances->lastItem(),
+                ],
+                'total_ordonnances' => $totalOrdonnances,
+                'medicament_libre' => $medicamentLibre,
+                'medicament_exact' => $medicamentExact,
+                'date_filtre' => $dateFiltre,
+                'current_dossier' => $currentDossier,
+                'type_recherche' => $medicamentLibre ? 'libre' : ($medicamentExact ? 'exacte' : 'date_seulement'),
+                'criteres_recherche' => [
+                    'par_medicament_libre' => !empty($medicamentLibre),
+                    'par_medicament_exact' => !empty($medicamentExact),
+                    'par_date' => !empty($dateFiltre),
+                    'recherche_combinee' => (!empty($medicamentLibre) || !empty($medicamentExact)) && !empty($dateFiltre)
+                ]
+            ],
+            'message' => 'Historique récupéré avec succès (recherche libre)'
+        ]);
+
+    } catch (ValidationException $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Paramètres de recherche invalides',
+            'errors' => $e->errors()
+        ], 422);
+    } catch (Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Erreur lors de la récupération de l\'historique libre',
+            'error' => config('app.debug') ? $e->getMessage() : 'Erreur serveur'
+        ], 500);
+    }
+}
+
+/**
+ * Obtenir les statistiques détaillées d'un médicament recherché
+ * UTILE pour afficher des informations sur le médicament recherché
+ */
+public function getStatistiquesMedicament(Request $request): JsonResponse
+{
+    // Vérifier la sélection du dossier
+    $folderCheck = $this->checkDossierSelection($request);
+    if ($folderCheck) return $folderCheck;
+
+    try {
+        $validated = $request->validate([
+            'medicament' => 'required|string|min:2|max:255'
+        ]);
+
+        $medicament = $validated['medicament'];
+        $currentDossier = $request->get('current_dossier_vente');
+
+        // Statistiques détaillées du médicament
+        $stats = DB::table('ordonnance_lignes')
+            ->join('ordonnances', 'ordonnance_lignes.ordonnance_id', '=', 'ordonnances.id')
+            ->join('clients', 'ordonnances.client_id', '=', 'clients.id')
+            ->join('medecins', 'ordonnances.medecin_id', '=', 'medecins.id')
+            ->where('ordonnances.dossier_vente', $currentDossier)
+            ->where('ordonnance_lignes.designation', 'LIKE', '%' . $medicament . '%')
+            ->select([
+                DB::raw('COUNT(DISTINCT ordonnances.id) as total_ordonnances'),
+                DB::raw('COUNT(ordonnance_lignes.id) as total_prescriptions'),
+                DB::raw('SUM(ordonnance_lignes.quantite) as quantite_totale'),
+                DB::raw('AVG(ordonnance_lignes.quantite) as quantite_moyenne'),
+                DB::raw('MIN(ordonnances.date) as premiere_prescription'),
+                DB::raw('MAX(ordonnances.date) as derniere_prescription'),
+                DB::raw('COUNT(DISTINCT clients.id) as patients_uniques'),
+                DB::raw('COUNT(DISTINCT medecins.id) as medecins_prescripteurs')
+            ])
+            ->first();
+
+        // Top 5 des posologies les plus utilisées pour ce médicament
+        $posologies = DB::table('ordonnance_lignes')
+            ->join('ordonnances', 'ordonnance_lignes.ordonnance_id', '=', 'ordonnances.id')
+            ->where('ordonnances.dossier_vente', $currentDossier)
+            ->where('ordonnance_lignes.designation', 'LIKE', '%' . $medicament . '%')
+            ->select('ordonnance_lignes.posologie', DB::raw('COUNT(*) as utilisation_count'))
+            ->groupBy('ordonnance_lignes.posologie')
+            ->orderBy('utilisation_count', 'desc')
+            ->limit(5)
+            ->get();
+
+        // Évolution mensuelle des prescriptions (6 derniers mois)
+        $evolutionMensuelle = DB::table('ordonnance_lignes')
+            ->join('ordonnances', 'ordonnance_lignes.ordonnance_id', '=', 'ordonnances.id')
+            ->where('ordonnances.dossier_vente', $currentDossier)
+            ->where('ordonnance_lignes.designation', 'LIKE', '%' . $medicament . '%')
+            ->where('ordonnances.date', '>=', now()->subMonths(6))
+            ->select(
+                DB::raw('YEAR(ordonnances.date) as annee'),
+                DB::raw('MONTH(ordonnances.date) as mois'),
+                DB::raw('COUNT(*) as prescriptions'),
+                DB::raw('SUM(ordonnance_lignes.quantite) as quantite_totale')
+            )
+            ->groupBy('annee', 'mois')
+            ->orderBy('annee', 'desc')
+            ->orderBy('mois', 'desc')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'medicament_recherche' => $medicament,
+                'statistiques_generales' => $stats,
+                'posologies_frequentes' => $posologies,
+                'evolution_mensuelle' => $evolutionMensuelle,
+                'current_dossier' => $currentDossier
+            ],
+            'message' => "Statistiques détaillées pour '$medicament'"
+        ]);
+
+    } catch (ValidationException $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Paramètres invalides',
+            'errors' => $e->errors()
+        ], 422);
+    } catch (Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Erreur lors du calcul des statistiques',
+            'error' => config('app.debug') ? $e->getMessage() : 'Erreur serveur'
+        ], 500);
+    }
+}
+
 /**
  * Exporter la liste des ordonnances de l'historique en PDF
  */

@@ -146,6 +146,15 @@ Route::prefix('ordonnances')->group(function () {
     Route::get('historique/export', [OrdonnanceController::class, 'exportHistoriqueList'])->name('ordonnances.historique.export');
     Route::get('historique/print', [OrdonnanceController::class, 'printHistoriqueList'])->name('ordonnances.historique.print');
     
+    // Recherche rapide de médicaments pour autocomplétion
+    Route::get('/medicaments/search-rapide', [OrdonnanceController::class, 'searchMedicamentsRapide']);
+    
+    // Historique avec recherche libre
+    Route::get('/historique/libre', [OrdonnanceController::class, 'getHistoriqueParMedicamentLibre']);
+    
+    // Statistiques détaillées d'un médicament
+    Route::get('/medicaments/statistiques', [OrdonnanceController::class, 'getStatistiquesMedicament']);
+
     // 2. CRUD principal (routes paramétrées APRÈS les spécifiques)
     Route::get('/', [OrdonnanceController::class, 'index']);
     Route::post('/', [OrdonnanceController::class, 'store']);
