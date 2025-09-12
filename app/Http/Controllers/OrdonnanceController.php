@@ -1093,10 +1093,12 @@ public function getHistoriqueParMedicamentLibre(Request $request): JsonResponse
             });
         }
 
-        // Filtre par date
         if ($dateFiltre) {
-            $query->whereDate('date', $dateFiltre);
-        }
+    // Extraire l'année et le mois de la date YYYY-MM-01
+    $date = \Carbon\Carbon::parse($dateFiltre);
+    $query->whereYear('date', $date->year)
+          ->whereMonth('date', $date->month);
+}
 
         $ordonnances = $query->orderBy('date', 'desc')
                             ->orderBy('created_at', 'desc')
@@ -1118,8 +1120,10 @@ public function getHistoriqueParMedicamentLibre(Request $request): JsonResponse
         }
 
         if ($dateFiltre) {
-            $queryCount->whereDate('date', $dateFiltre);
-        }
+    $date = \Carbon\Carbon::parse($dateFiltre);
+    $queryCount->whereYear('date', $date->year)
+               ->whereMonth('date', $date->month);
+}
 
         $totalOrdonnances = $queryCount->count();
 
@@ -1311,9 +1315,12 @@ public function exportHistoriqueList(Request $request)
             });
         }
 
-        if ($dateFiltre) {
-            $query->whereDate('date', $dateFiltre);
-        }
+        // APRÈS (correct)
+if ($dateFiltre) {
+    $date = \Carbon\Carbon::parse($dateFiltre);
+    $query->whereYear('date', $date->year)
+          ->whereMonth('date', $date->month);
+}
 
         $ordonnances = $query->orderBy('date', 'desc')
                             ->orderBy('created_at', 'desc')
@@ -1422,9 +1429,12 @@ public function printHistoriqueList(Request $request)
             });
         }
 
-        if ($dateFiltre) {
-            $query->whereDate('date', $dateFiltre);
-        }
+        // APRÈS (correct)
+if ($dateFiltre) {
+    $date = \Carbon\Carbon::parse($dateFiltre);
+    $query->whereYear('date', $date->year)
+          ->whereMonth('date', $date->month);
+}
 
         $ordonnances = $query->orderBy('date', 'desc')
                             ->orderBy('created_at', 'desc')
