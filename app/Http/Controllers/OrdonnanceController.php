@@ -1041,6 +1041,11 @@ public function searchMedicamentsRapide(Request $request): JsonResponse
  * Récupérer l'historique avec recherche libre de médicaments
  * SUPPORTE la saisie libre (pas seulement les médicaments existants)
  */
+/**
+ * Récupérer l'historique avec recherche libre de médicaments
+ * SUPPORTE la saisie libre (pas seulement les médicaments existants)
+ * MODIFIÉ : Support recherche par année seule
+ */
 public function getHistoriqueParMedicamentLibre(Request $request): JsonResponse
 {
     // Vérifier la sélection du dossier
@@ -1052,6 +1057,7 @@ public function getHistoriqueParMedicamentLibre(Request $request): JsonResponse
             'medicament_libre' => 'nullable|string|min:2|max:255',
             'medicament' => 'nullable|string|max:255', // Recherche exacte (ancienne)
             'date' => 'nullable|date',
+            'filter_type' => 'nullable|string|in:month,year', // NOUVEAU PARAMÈTRE
             'page' => 'nullable|integer|min:1',
             'per_page' => 'nullable|integer|min:1|max:100'
         ]);
@@ -1060,6 +1066,7 @@ public function getHistoriqueParMedicamentLibre(Request $request): JsonResponse
         $medicamentLibre = $validated['medicament_libre'] ?? null;
         $medicamentExact = $validated['medicament'] ?? null;
         $dateFiltre = $validated['date'] ?? null;
+        $filterType = $validated['filter_type'] ?? null; // NOUVEAU
         $currentDossier = $request->get('current_dossier_vente');
 
         // Vérifier qu'au moins un critère est fourni
@@ -1093,12 +1100,30 @@ public function getHistoriqueParMedicamentLibre(Request $request): JsonResponse
             });
         }
 
+        // MODIFICATION PRINCIPALE : Gestion flexible des filtres de date
         if ($dateFiltre) {
-    // Extraire l'année et le mois de la date YYYY-MM-01
-    $date = \Carbon\Carbon::parse($dateFiltre);
-    $query->whereYear('date', $date->year)
-          ->whereMonth('date', $date->month);
-}
+            $date = \Carbon\Carbon::parse($dateFiltre);
+            
+            // Déterminer le type de filtre automatiquement si pas spécifié
+            if (!$filterType) {
+                // Si on a un médicament + une date qui est le 1er janvier, on filtre par année
+                if (($medicamentLibre || $medicamentExact) && $date->month == 1 && $date->day == 1) {
+                    $filterType = 'year';
+                } else {
+                    $filterType = 'month';
+                }
+            }
+            
+            // Appliquer le filtre selon le type
+            if ($filterType === 'year') {
+                // Filtre par année seulement
+                $query->whereYear('date', $date->year);
+            } else {
+                // Filtre par année ET mois (comportement original)
+                $query->whereYear('date', $date->year)
+                      ->whereMonth('date', $date->month);
+            }
+        }
 
         $ordonnances = $query->orderBy('date', 'desc')
                             ->orderBy('created_at', 'desc')
@@ -1119,11 +1144,25 @@ public function getHistoriqueParMedicamentLibre(Request $request): JsonResponse
             });
         }
 
+        // MÊME LOGIQUE pour le comptage
         if ($dateFiltre) {
-    $date = \Carbon\Carbon::parse($dateFiltre);
-    $queryCount->whereYear('date', $date->year)
-               ->whereMonth('date', $date->month);
-}
+            $date = \Carbon\Carbon::parse($dateFiltre);
+            
+            if (!$filterType) {
+                if (($medicamentLibre || $medicamentExact) && $date->month == 1 && $date->day == 1) {
+                    $filterType = 'year';
+                } else {
+                    $filterType = 'month';
+                }
+            }
+            
+            if ($filterType === 'year') {
+                $queryCount->whereYear('date', $date->year);
+            } else {
+                $queryCount->whereYear('date', $date->year)
+                           ->whereMonth('date', $date->month);
+            }
+        }
 
         $totalOrdonnances = $queryCount->count();
 
@@ -1158,12 +1197,15 @@ public function getHistoriqueParMedicamentLibre(Request $request): JsonResponse
                 'medicament_libre' => $medicamentLibre,
                 'medicament_exact' => $medicamentExact,
                 'date_filtre' => $dateFiltre,
+                'filter_type' => $filterType, // NOUVEAU
                 'current_dossier' => $currentDossier,
                 'type_recherche' => $medicamentLibre ? 'libre' : ($medicamentExact ? 'exacte' : 'date_seulement'),
                 'criteres_recherche' => [
                     'par_medicament_libre' => !empty($medicamentLibre),
                     'par_medicament_exact' => !empty($medicamentExact),
                     'par_date' => !empty($dateFiltre),
+                    'filtre_annuel' => $filterType === 'year', // NOUVEAU
+                    'filtre_mensuel' => $filterType === 'month', // NOUVEAU
                     'recherche_combinee' => (!empty($medicamentLibre) || !empty($medicamentExact)) && !empty($dateFiltre)
                 ]
             ],
@@ -1278,7 +1320,7 @@ public function getStatistiquesMedicament(Request $request): JsonResponse
 }
 
 /**
- * Exporter la liste des ordonnances de l'historique en PDF
+ * Exporter la liste des ordonnances de l'historique en PDF - CORRIGÉ
  */
 public function exportHistoriqueList(Request $request)
 {
@@ -1290,12 +1332,14 @@ public function exportHistoriqueList(Request $request)
         $validated = $request->validate([
             'medicament' => 'nullable|string',
             'date' => 'nullable|date',
+            'filter_type' => 'nullable|string|in:month,year', // NOUVEAU PARAMÈTRE
             'titre' => 'nullable|string',
             'format' => 'nullable|string|in:pdf'
         ]);
 
         $medicament = $validated['medicament'] ?? null;
         $dateFiltre = $validated['date'] ?? null;
+        $filterType = $validated['filter_type'] ?? null; // NOUVEAU
         $titre = $validated['titre'] ?? 'Liste des ordonnances';
         $currentDossier = $request->get('current_dossier_vente');
 
@@ -1311,16 +1355,34 @@ public function exportHistoriqueList(Request $request)
 
         if ($medicament) {
             $query->whereHas('lignes', function ($q) use ($medicament) {
-                $q->where('designation', $medicament);
+                $q->where('designation', 'LIKE', '%' . $medicament . '%'); // CORRECTION : Utiliser LIKE comme dans l'historique
             });
         }
 
-        // APRÈS (correct)
-if ($dateFiltre) {
-    $date = \Carbon\Carbon::parse($dateFiltre);
-    $query->whereYear('date', $date->year)
-          ->whereMonth('date', $date->month);
-}
+        // CORRECTION PRINCIPALE : Appliquer la même logique que getHistoriqueParMedicamentLibre
+        if ($dateFiltre) {
+            $date = \Carbon\Carbon::parse($dateFiltre);
+            
+            // Déterminer le type de filtre automatiquement si pas spécifié
+            if (!$filterType) {
+                // Si on a un médicament + une date qui est le 1er janvier, on filtre par année
+                if ($medicament && $date->month == 1 && $date->day == 1) {
+                    $filterType = 'year';
+                } else {
+                    $filterType = 'month';
+                }
+            }
+            
+            // Appliquer le filtre selon le type
+            if ($filterType === 'year') {
+                // Filtre par année seulement
+                $query->whereYear('date', $date->year);
+            } else {
+                // Filtre par année ET mois (comportement original)
+                $query->whereYear('date', $date->year)
+                      ->whereMonth('date', $date->month);
+            }
+        }
 
         $ordonnances = $query->orderBy('date', 'desc')
                             ->orderBy('created_at', 'desc')
@@ -1334,7 +1396,7 @@ if ($dateFiltre) {
         }
 
         // Générer le HTML pour la liste
-        $html = $this->buildHistoriqueListHtml($ordonnances, $titre, $medicament, $dateFiltre, $currentDossier);
+        $html = $this->buildHistoriqueListHtml($ordonnances, $titre, $medicament, $dateFiltre, $currentDossier, $filterType);
 
         // Si c'est un export PDF, utiliser DomPDF
         if ($validated['format'] === 'pdf') {
@@ -1371,6 +1433,7 @@ if ($dateFiltre) {
                 'criteres' => [
                     'medicament' => $medicament,
                     'date' => $dateFiltre,
+                    'filter_type' => $filterType,
                     'dossier' => $currentDossier
                 ]
             ],
@@ -1393,7 +1456,7 @@ if ($dateFiltre) {
 }
 
 /**
- * Imprimer la liste des ordonnances de l'historique
+ * Imprimer la liste des ordonnances de l'historique - CORRIGÉ
  */
 public function printHistoriqueList(Request $request)
 {
@@ -1405,11 +1468,13 @@ public function printHistoriqueList(Request $request)
         $validated = $request->validate([
             'medicament' => 'nullable|string',
             'date' => 'nullable|date',
+            'filter_type' => 'nullable|string|in:month,year', // NOUVEAU PARAMÈTRE
             'titre' => 'nullable|string'
         ]);
 
         $medicament = $validated['medicament'] ?? null;
         $dateFiltre = $validated['date'] ?? null;
+        $filterType = $validated['filter_type'] ?? null; // NOUVEAU
         $titre = $validated['titre'] ?? 'Liste des ordonnances';
         $currentDossier = $request->get('current_dossier_vente');
 
@@ -1425,16 +1490,34 @@ public function printHistoriqueList(Request $request)
 
         if ($medicament) {
             $query->whereHas('lignes', function ($q) use ($medicament) {
-                $q->where('designation', $medicament);
+                $q->where('designation', 'LIKE', '%' . $medicament . '%'); // CORRECTION : Utiliser LIKE comme dans l'historique
             });
         }
 
-        // APRÈS (correct)
-if ($dateFiltre) {
-    $date = \Carbon\Carbon::parse($dateFiltre);
-    $query->whereYear('date', $date->year)
-          ->whereMonth('date', $date->month);
-}
+        // CORRECTION PRINCIPALE : Appliquer la même logique que getHistoriqueParMedicamentLibre
+        if ($dateFiltre) {
+            $date = \Carbon\Carbon::parse($dateFiltre);
+            
+            // Déterminer le type de filtre automatiquement si pas spécifié
+            if (!$filterType) {
+                // Si on a un médicament + une date qui est le 1er janvier, on filtre par année
+                if ($medicament && $date->month == 1 && $date->day == 1) {
+                    $filterType = 'year';
+                } else {
+                    $filterType = 'month';
+                }
+            }
+            
+            // Appliquer le filtre selon le type
+            if ($filterType === 'year') {
+                // Filtre par année seulement
+                $query->whereYear('date', $date->year);
+            } else {
+                // Filtre par année ET mois (comportement original)
+                $query->whereYear('date', $date->year)
+                      ->whereMonth('date', $date->month);
+            }
+        }
 
         $ordonnances = $query->orderBy('date', 'desc')
                             ->orderBy('created_at', 'desc')
@@ -1448,13 +1531,19 @@ if ($dateFiltre) {
         }
 
         // Générer le HTML imprimable
-        $html = $this->buildHistoriqueListHtml($ordonnances, $titre, $medicament, $dateFiltre, $currentDossier);
+        $html = $this->buildHistoriqueListHtml($ordonnances, $titre, $medicament, $dateFiltre, $currentDossier, $filterType);
 
         return response()->json([
             'success' => true,
             'data' => [
                 'html' => $html,
-                'total_ordonnances' => $ordonnances->count()
+                'total_ordonnances' => $ordonnances->count(),
+                'criteres' => [
+                    'medicament' => $medicament,
+                    'date' => $dateFiltre,
+                    'filter_type' => $filterType,
+                    'dossier' => $currentDossier
+                ]
             ],
             'message' => 'Liste préparée pour impression'
         ]);
@@ -1473,7 +1562,6 @@ if ($dateFiltre) {
         ], 500);
     }
 }
-
 /**
  * Construire le HTML pour la liste de l'historique
  */
@@ -1614,7 +1702,7 @@ private function buildHistoriqueListHtml($ordonnances, $titre, $medicament = nul
             
             .ordonnance-numero {
                 font-weight: bold;
-                color: #1e40af;
+                color: black;
             }
             
             .client-nom {
