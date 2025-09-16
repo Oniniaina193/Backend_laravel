@@ -390,9 +390,7 @@ public function generatePrintableHtml(Ordonnance $ordonnance): JsonResponse
     }
 }
 
-/**
- * Construire le HTML formaté pour l'impression
- */
+//cporrection
 private function buildPrintableHtml(Ordonnance $ordonnance): string
 {
     $html = '
@@ -403,24 +401,32 @@ private function buildPrintableHtml(Ordonnance $ordonnance): string
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Ordonnance ' . htmlspecialchars($ordonnance->numero_ordonnance) . '</title>
         <style>
-            @media print {
+            /* STYLES OPTIMISÉS POUR PDF ET IMPRESSION IDENTIQUES */
+            @media print, screen {
                 @page {
                     margin: 1cm;
-                    size: A4;
+                    size: A4 portrait;
                 }
-                body { margin: 0; }
-                .no-print { display: none !important; }
+                body { 
+                    margin: 0; 
+                    padding: 0;
+                }
+                .no-print { 
+                    display: none !important; 
+                }
             }
             
             body {
-                font-family: "Arial", sans-serif;
+                font-family: "Arial", "Helvetica", sans-serif;
                 font-size: 12pt;
                 line-height: 1.4;
-                color: #000;
+                color: #000000;
                 max-width: 21cm;
                 margin: 0 auto;
                 padding: 1cm;
-                background: white;
+                background: #ffffff;
+                -webkit-print-color-adjust: exact;
+                color-adjust: exact;
             }
             
             .ordonnance-header {
@@ -428,6 +434,7 @@ private function buildPrintableHtml(Ordonnance $ordonnance): string
                 border-bottom: 2px solid #2563eb;
                 padding-bottom: 15px;
                 margin-bottom: 25px;
+                page-break-after: avoid;
             }
             
             .ordonnance-title {
@@ -435,23 +442,22 @@ private function buildPrintableHtml(Ordonnance $ordonnance): string
                 font-weight: bold;
                 color: #1e40af;
                 margin-bottom: 5px;
-            }
-            
-            .ordonnance-subtitle {
-                font-size: 14pt;
-                color: #6b7280;
-                margin-bottom: 15px;
+                line-height: 1.2;
             }
             
             .ordonnance-info {
-                display: flex;
-                justify-content: space-between;
+                display: table;
+                width: 100%;
                 margin-bottom: 25px;
-                gap: 20px;
+                border-collapse: separate;
+                border-spacing: 10px;
             }
             
             .info-section {
-                flex: 1;
+                display: table-cell;
+                vertical-align: top;
+                width: 33.333%;
+                padding: 0 5px;
             }
             
             .info-section h3 {
@@ -461,21 +467,25 @@ private function buildPrintableHtml(Ordonnance $ordonnance): string
                 margin-bottom: 8px;
                 border-bottom: 1px solid #e5e7eb;
                 padding-bottom: 3px;
+                page-break-after: avoid;
             }
             
             .info-section p {
                 margin: 4px 0;
                 font-size: 11pt;
+                line-height: 1.3;
             }
             
             .info-label {
                 font-weight: bold;
                 display: inline-block;
-                width: 80px;
+                width: 70px;
+                color: #374151;
             }
             
             .medicaments-section {
                 margin-top: 30px;
+                page-break-inside: avoid;
             }
             
             .medicaments-title {
@@ -487,6 +497,7 @@ private function buildPrintableHtml(Ordonnance $ordonnance): string
                 background-color: #f3f4f6;
                 padding: 8px;
                 border-radius: 4px;
+                page-break-after: avoid;
             }
             
             .medicament-item {
@@ -503,18 +514,20 @@ private function buildPrintableHtml(Ordonnance $ordonnance): string
                 font-weight: bold;
                 color: #1f2937;
                 margin-bottom: 8px;
+                page-break-after: avoid;
             }
             
             .medicament-details {
-                display: grid;
-                grid-template-columns: 1fr 1fr 1fr;
-                gap: 15px;
-                font-size: 11pt;
+                display: table;
+                width: 100%;
+                border-collapse: separate;
+                border-spacing: 5px;
             }
             
             .detail-item {
-                display: flex;
-                flex-direction: column;
+                display: table-cell;
+                vertical-align: top;
+                width: 33.333%;
             }
             
             .detail-label {
@@ -522,25 +535,38 @@ private function buildPrintableHtml(Ordonnance $ordonnance): string
                 color: #4b5563;
                 font-size: 10pt;
                 margin-bottom: 2px;
+                display: block;
             }
             
             .detail-value {
                 color: #1f2937;
                 font-size: 11pt;
+                display: block;
             }
             
             .ordonnance-footer {
                 margin-top: 40px;
-                display: flex;
-                justify-content: space-between;
-                align-items: end;
+                display: table;
+                width: 100%;
                 border-top: 1px solid #e5e7eb;
                 padding-top: 20px;
+                page-break-inside: avoid;
+            }
+            
+            .print-info {
+                display: table-cell;
+                vertical-align: bottom;
+                width: 50%;
+                font-size: 9pt;
+                color: #6b7280;
+                text-align: left;
             }
             
             .signature-section {
+                display: table-cell;
+                vertical-align: bottom;
+                width: 50%;
                 text-align: center;
-                width: 200px;
             }
             
             .signature-label {
@@ -548,50 +574,25 @@ private function buildPrintableHtml(Ordonnance $ordonnance): string
                 font-weight: bold;
                 margin-bottom: 40px;
                 color: #4b5563;
+                display: block;
             }
             
             .signature-line {
-                border-bottom: 1px solid #000;
+                border-bottom: 1px solid #000000;
                 width: 180px;
                 margin: 0 auto;
+                height: 1px;
             }
             
-            .print-info {
-                font-size: 9pt;
-                color: #6b7280;
-                text-align: left;
+            /* CORRECTION : Styles spécifiques pour assurer la cohérence */
+            * {
+                box-sizing: border-box;
             }
             
-            .prescription-note {
-                background-color: #fef3c7;
-                border: 1px solid #f59e0b;
-                border-radius: 4px;
-                padding: 10px;
-                margin: 20px 0;
-                font-size: 10pt;
-                color: #92400e;
-            }
+            /* Éviter les problèmes de rendu PDF */
+            img { max-width: 100%; height: auto; }
+            table { border-collapse: collapse; }
             
-            @media print {
-                .ordonnance-info {
-                    display: table;
-                    width: 100%;
-                }
-                .info-section {
-                    display: table-cell;
-                    vertical-align: top;
-                    padding-right: 20px;
-                }
-                .medicament-details {
-                    display: table;
-                    width: 100%;
-                }
-                .detail-item {
-                    display: table-cell;
-                    padding-right: 15px;
-                    vertical-align: top;
-                }
-            }
         </style>
     </head>
     <body>
@@ -678,7 +679,7 @@ private function buildPrintableHtml(Ordonnance $ordonnance): string
                 </div>
                 
                 <div class="signature-section">
-                    <p class="signature-label">Signature et cachet du médecin</p>
+                    <span class="signature-label">Signature et cachet du médecin</span>
                     <div class="signature-line"></div>
                 </div>
             </div>
@@ -690,8 +691,8 @@ private function buildPrintableHtml(Ordonnance $ordonnance): string
 }
 
 /**
- * OPTIONNEL : Générer un PDF de l'ordonnance
- * Nécessite l'installation de dompdf : composer require dompdf/dompdf
+ * MÉTHODE CORRIGÉE pour générer un PDF de l'ordonnance individuelle
+ * Remplace votre méthode generatePdf() existante
  */
 public function generatePdf(Ordonnance $ordonnance)
 {
@@ -699,18 +700,32 @@ public function generatePdf(Ordonnance $ordonnance)
         // Charger les relations
         $ordonnance->load(['medecin', 'client', 'lignes']);
         
-        // Générer le HTML
+        // CORRECTION : Générer le même HTML que pour l'impression
         $html = $this->buildPrintableHtml($ordonnance);
         
-        // Créer le PDF avec DomPDF
+        // CORRECTION : Configuration DomPDF optimisée pour correspondre à l'impression
         $pdf = new \Dompdf\Dompdf([
             'defaultFont' => 'Arial',
+            'defaultFontSize' => 12, // AJOUT : Même taille que CSS
             'isRemoteEnabled' => false,
-            'isPhpEnabled' => false
+            'isPhpEnabled' => false,
+            'isHtml5ParserEnabled' => true, // AJOUT : Support HTML5
+            'isFontSubsettingEnabled' => true, // AJOUT : Optimisation des polices
+            'tempDir' => sys_get_temp_dir(), // AJOUT : Dossier temporaire
         ]);
         
-        $pdf->loadHtml($html);
+        // CORRECTION : Charger le HTML avec les mêmes options
+        $pdf->loadHtml($html, 'UTF-8'); // Spécifier l'encodage
+        
+        // CORRECTION : Paramètres de page identiques au CSS
         $pdf->setPaper('A4', 'portrait');
+        
+        // CORRECTION : Options de rendu pour correspondre à l'impression
+        $pdf->getOptions()->set([
+            'defaultMediaType' => 'print', // IMPORTANT : Utiliser les styles @media print
+            'isFontSubsettingEnabled' => true,
+        ]);
+        
         $pdf->render();
         
         // Nom du fichier
@@ -718,7 +733,10 @@ public function generatePdf(Ordonnance $ordonnance)
         
         return response($pdf->output(), 200)
             ->header('Content-Type', 'application/pdf')
-            ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
+            ->header('Content-Disposition', 'attachment; filename="' . $filename . '"')
+            ->header('Cache-Control', 'no-cache, no-store, must-revalidate') // AJOUT
+            ->header('Pragma', 'no-cache') // AJOUT
+            ->header('Expires', '0'); // AJOUT
             
     } catch (Exception $e) {
         return response()->json([
