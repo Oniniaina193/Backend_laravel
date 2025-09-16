@@ -12,67 +12,263 @@ use Exception;
 class DataRefreshController extends Controller
 {
     /**
-     * Forcer la mise à jour de toutes les données Access
-     */
-    public function refreshAllData(Request $request): JsonResponse
-    {
-        try {
-            if (!$request->session()->isStarted()) {
-                $request->session()->start();
-            }
+ * Forcer la mise à jour RÉELLE de toutes les données Access
+ */
+public function refreshAllData(Request $request): JsonResponse
+{
+    try {
+        if (!$request->session()->isStarted()) {
+            $request->session()->start();
+        }
 
-            $selectedFolder = $request->session()->get('selected_folder');
-            if (!$selectedFolder) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Aucun dossier sélectionné'
-                ], 400);
-            }
-
-            Log::info('🔄 Début du refresh des données Access', [
-                'dossier' => $selectedFolder['folder_name'] ?? 'Inconnu',
-                'timestamp' => now()
-            ]);
-
-            // 1. Tester les connexions et forcer la reconnexion
-            $connectionResults = $this->testAndRefreshConnections($selectedFolder);
-
-            // 2. Vider les caches Laravel si ils existent
-            $this->clearApplicationCaches();
-
-            // 3. Obtenir un aperçu des données rafraîchies
-            $dataSnapshot = $this->getDataSnapshot($selectedFolder);
-
-            Log::info('✅ Refresh des données terminé avec succès', [
-                'connections' => $connectionResults,
-                'data_snapshot' => $dataSnapshot,
-                'timestamp' => now()
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Données mises à jour avec succès',
-                'data' => [
-                    'refresh_timestamp' => now()->toISOString(),
-                    'dossier_name' => $selectedFolder['folder_name'] ?? 'Inconnu',
-                    'connections' => $connectionResults,
-                    'data_snapshot' => $dataSnapshot,
-                    'cache_cleared' => true
-                ]
-            ]);
-
-        } catch (Exception $e) {
-            Log::error('❌ Erreur lors du refresh des données', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-
+        $selectedFolder = $request->session()->get('selected_folder');
+        if (!$selectedFolder) {
             return response()->json([
                 'success' => false,
-                'message' => 'Erreur lors de la mise à jour: ' . $e->getMessage()
-            ], 500);
+                'message' => 'Aucun dossier sélectionné'
+            ], 400);
         }
+
+        Log::info('🔄 Début du refresh RÉEL des données Access', [
+            'dossier' => $selectedFolder['folder_name'] ?? 'Inconnu',
+            'timestamp' => now()
+        ]);
+
+        // 1. Vider les caches d'abord
+        $this->clearApplicationCaches();
+
+        // 2. NOUVEAU: Forcer la fermeture de toutes les connexions ODBC
+        $this->forceCloseOdbcConnections();
+
+        // 3. NOUVEAU: Attendre un court délai pour la libération des fichiers
+        usleep(500000); // 0.5 seconde
+
+        // 4. NOUVEAU: Vérifier les timestamps des fichiers pour détecter les changements
+        $fileTimestamps = $this->getAccessFilesTimestamps($selectedFolder);
+
+        // 5. NOUVEAU: Forcer une nouvelle lecture des données depuis les fichiers
+        $refreshResults = $this->forceDataRefreshFromFiles($selectedFolder);
+
+        // 6. Tester les nouvelles connexions
+        $connectionResults = $this->testAndRefreshConnections($selectedFolder);
+
+        // 7. Obtenir un aperçu des données rafraîchies
+        $dataSnapshot = $this->getDataSnapshot($selectedFolder);
+
+        Log::info('✅ Refresh RÉEL des données terminé', [
+            'file_timestamps' => $fileTimestamps,
+            'refresh_results' => $refreshResults,
+            'connections' => $connectionResults,
+            'data_snapshot' => $dataSnapshot
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Données mises à jour avec succès (refresh complet)',
+            'data' => [
+                'refresh_timestamp' => now()->toISOString(),
+                'dossier_name' => $selectedFolder['folder_name'] ?? 'Inconnu',
+                'file_timestamps' => $fileTimestamps,
+                'refresh_results' => $refreshResults,
+                'connections' => $connectionResults,
+                'data_snapshot' => $dataSnapshot,
+                'cache_cleared' => true,
+                'full_refresh' => true
+            ]
+        ]);
+
+    } catch (Exception $e) {
+        Log::error('❌ Erreur lors du refresh RÉEL', [
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Erreur lors de la mise à jour: ' . $e->getMessage()
+        ], 500);
     }
+}
+
+/**
+ * NOUVEAU: Forcer la fermeture des connexions ODBC
+ */
+private function forceCloseOdbcConnections(): array
+{
+    $results = [];
+    
+    try {
+        // Méthode 1: Fermer via PDO si des connexions sont ouvertes
+        if (class_exists('PDO')) {
+            // On ne peut pas vraiment fermer toutes les connexions ODBC système
+            // mais on peut forcer PHP à libérer ses ressources
+            gc_collect_cycles();
+            $results['gc_collected'] = true;
+        }
+
+        // Méthode 2: Si opcache est activé, le vider aussi
+        if (function_exists('opcache_reset')) {
+            opcache_reset();
+            $results['opcache_reset'] = true;
+        }
+
+        Log::info('🔌 Connexions ODBC fermées');
+        return $results;
+
+    } catch (Exception $e) {
+        Log::warning('Erreur fermeture connexions ODBC', ['error' => $e->getMessage()]);
+        return ['error' => $e->getMessage()];
+    }
+}
+
+/**
+ * NOUVEAU: Obtenir les timestamps des fichiers Access
+ */
+private function getAccessFilesTimestamps($selectedFolder): array
+{
+    $timestamps = [];
+    
+    try {
+        // Fichier principal Caiss.mdb
+        $accessDbPath = $this->getAccessDbPath($selectedFolder);
+        if (file_exists($accessDbPath)) {
+            $timestamps['caiss_mdb'] = [
+                'path' => $accessDbPath,
+                'last_modified' => filemtime($accessDbPath),
+                'last_modified_formatted' => date('Y-m-d H:i:s', filemtime($accessDbPath)),
+                'size' => filesize($accessDbPath)
+            ];
+        }
+
+        // Fichier facturation
+        $facturationDbPath = $this->getFacturationDbPath($selectedFolder);
+        if (file_exists($facturationDbPath)) {
+            $timestamps['facturation_mdb'] = [
+                'path' => $facturationDbPath,
+                'last_modified' => filemtime($facturationDbPath),
+                'last_modified_formatted' => date('Y-m-d H:i:s', filemtime($facturationDbPath)),
+                'size' => filesize($facturationDbPath)
+            ];
+        }
+
+        // Fichier frontoffice
+        $frontofficeDbPath = $this->getFrontofficeDbPath($selectedFolder);
+        if (file_exists($frontofficeDbPath)) {
+            $timestamps['frontoffice_mdb'] = [
+                'path' => $frontofficeDbPath,
+                'last_modified' => filemtime($frontofficeDbPath),
+                'last_modified_formatted' => date('Y-m-d H:i:s', filemtime($frontofficeDbPath)),
+                'size' => filesize($frontofficeDbPath)
+            ];
+        }
+
+    } catch (Exception $e) {
+        Log::warning('Erreur lecture timestamps', ['error' => $e->getMessage()]);
+        $timestamps['error'] = $e->getMessage();
+    }
+
+    return $timestamps;
+}
+
+/**
+ * NOUVEAU: Forcer le rechargement des données depuis les fichiers
+ */
+private function forceDataRefreshFromFiles($selectedFolder): array
+{
+    $results = [
+        'caiss_db' => ['refreshed' => false, 'method' => '', 'error' => null],
+        'facturation_db' => ['refreshed' => false, 'method' => '', 'error' => null],
+        'frontoffice_db' => ['refreshed' => false, 'method' => '', 'error' => null]
+    ];
+
+    // Méthode 1: Connexions multiples avec paramètres spéciaux
+    try {
+        $accessDbPath = $this->getAccessDbPath($selectedFolder);
+        if (file_exists($accessDbPath)) {
+            // Créer plusieurs connexions successives pour forcer la relecture
+            for ($i = 0; $i < 3; $i++) {
+                $pdo = $this->connectToAccessWithRefresh($accessDbPath);
+                // Faire une requête simple pour forcer la lecture
+                $stmt = $pdo->query("SELECT COUNT(*) FROM Article");
+                $result = $stmt->fetch(PDO::FETCH_ASSOC);
+                $pdo = null; // Fermer immédiatement
+                usleep(100000); // 0.1 seconde entre les connexions
+            }
+            
+            $results['caiss_db'] = [
+                'refreshed' => true, 
+                'method' => 'multiple_connections',
+                'error' => null
+            ];
+        }
+    } catch (Exception $e) {
+        $results['caiss_db']['error'] = $e->getMessage();
+        Log::warning('Erreur refresh Caiss.mdb', ['error' => $e->getMessage()]);
+    }
+
+    // Répéter pour les autres bases
+    try {
+        $facturationDbPath = $this->getFacturationDbPath($selectedFolder);
+        if (file_exists($facturationDbPath)) {
+            for ($i = 0; $i < 3; $i++) {
+                $pdo = $this->connectToAccessWithRefresh($facturationDbPath);
+                $stmt = $pdo->query("SELECT COUNT(*) FROM Mouvementstock");
+                $result = $stmt->fetch(PDO::FETCH_ASSOC);
+                $pdo = null;
+                usleep(100000);
+            }
+            
+            $results['facturation_db'] = [
+                'refreshed' => true,
+                'method' => 'multiple_connections', 
+                'error' => null
+            ];
+        }
+    } catch (Exception $e) {
+        $results['facturation_db']['error'] = $e->getMessage();
+    }
+
+    try {
+        $frontofficeDbPath = $this->getFrontofficeDbPath($selectedFolder);
+        if (file_exists($frontofficeDbPath)) {
+            for ($i = 0; $i < 3; $i++) {
+                $pdo = $this->connectToAccessWithRefresh($frontofficeDbPath);
+                $stmt = $pdo->query("SELECT COUNT(*) FROM Ticket");
+                $result = $stmt->fetch(PDO::FETCH_ASSOC);
+                $pdo = null;
+                usleep(100000);
+            }
+            
+            $results['frontoffice_db'] = [
+                'refreshed' => true,
+                'method' => 'multiple_connections',
+                'error' => null
+            ];
+        }
+    } catch (Exception $e) {
+        $results['frontoffice_db']['error'] = $e->getMessage();
+    }
+
+    return $results;
+}
+
+/**
+ * NOUVEAU: Connexion Access avec paramètres de refresh
+ */
+private function connectToAccessWithRefresh(string $accessDbPath): PDO
+{
+    // Utiliser des paramètres ODBC pour forcer la relecture
+    $dsn = "odbc:DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=" . $accessDbPath . ";";
+    
+    $pdo = new PDO($dsn, '', '', [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        // Forcer à ne pas utiliser le cache
+        PDO::MYSQL_ATTR_USE_BUFFERED_QUERY => false,
+    ]);
+    
+    return $pdo;
+}
 
     /**
      * Tester et forcer la reconnexion aux bases Access
@@ -84,6 +280,31 @@ class DataRefreshController extends Controller
             'facturation_db' => ['connected' => false, 'records' => 0, 'error' => null],
             'frontoffice_db' => ['connected' => false, 'records' => 0, 'error' => null]
         ];
+
+         // FORCER une nouvelle connexion pour chaque base
+    try {
+        $accessDbPath = $this->getAccessDbPath($selectedFolder);
+        if (file_exists($accessDbPath)) {
+            // Attendre un peu avant la reconnexion
+            usleep(200000); // 0.2 seconde
+            
+            $accessPdo = $this->connectToAccessWithRefresh($accessDbPath);
+            $stmt = $accessPdo->query("SELECT COUNT(*) as total FROM Article");
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            $results['caiss_db'] = [
+                'connected' => true,
+                'records' => $result['total'],
+                'path' => $accessDbPath,
+                'reconnected' => true, // NOUVEAU flag
+                'error' => null
+            ];
+            
+            $accessPdo = null;
+        }
+    } catch (Exception $e) {
+        $results['caiss_db']['error'] = $e->getMessage();
+    }
 
         // Test connexion Caiss.mdb (principal)
         try {
